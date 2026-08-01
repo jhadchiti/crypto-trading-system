@@ -52,6 +52,7 @@ from typing import Optional
 
 import pandas as pd
 
+import secrets_local  # loads secrets.env into os.environ
 import dashboard as db   # reuse all the signal-computation machinery
 import donchian_baseline as dc
 import walk_forward_v3 as wf3

@@ -1,3 +1,6 @@
+# === NEVER COMMIT: credentials ===
+secrets.env
+
 # === NEVER COMMIT: personal financial state ===
 account_state.json
 equity_history.csv

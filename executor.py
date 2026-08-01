@@ -49,6 +49,7 @@ from pathlib import Path
 import pandas as pd
 import requests
 
+import secrets_local  # loads secrets.env into os.environ
 import dashboard as db
 import donchian_baseline as dc
 import walk_forward_v3 as wf3
@@ -200,12 +201,31 @@ def save_state(state: dict) -> None:
     STATE_FILE.write_text(json.dumps(state, indent=2, default=str), encoding="utf-8")
 
 
-def notify(message: str) -> None:
+COLOR_GREEN = 0x2ECC71   # entries
+COLOR_RED = 0xE74C3C     # exits / halts
+COLOR_GRAY = 0x95A5A6    # routine
+
+
+def notify(message: str, urgent: bool = False, title: str = "",
+           color: int = COLOR_GRAY) -> None:
+    """Discord delivery. urgent=True sends an @everyone ping + a colored
+    embed so real trades look NOTHING like routine FYI messages."""
     print(message)
     webhook = os.environ.get("DISCORD_WEBHOOK_URL")
     if not webhook:
         return
-    payload = json.dumps({"content": message[:1900]}).encode("utf-8")
+    if urgent:
+        body = {
+            "content": "@everyone",
+            "embeds": [{
+                "title": title or "TRADE EVENT",
+                "description": message[:3900],
+                "color": color,
+            }],
+        }
+    else:
+        body = {"content": message[:1900]}
+    payload = json.dumps(body).encode("utf-8")
     req = urllib.request.Request(
         webhook, data=payload,
         headers={"Content-Type": "application/json",
@@ -220,9 +240,9 @@ def notify(message: str) -> None:
 def halt(reason: str) -> None:
     KILL_FILE.write_text(f"halted {datetime.now(timezone.utc).isoformat()}: {reason}",
                          encoding="utf-8")
-    notify(f"**[EXECUTOR HALTED]** {reason}\n"
-           f"Trading stopped. Delete the STOP_TRADING file to re-enable "
-           f"after you investigate.")
+    notify(f"{reason}\n\nTrading stopped. Delete the STOP_TRADING file to "
+           f"re-enable after you investigate.",
+           urgent=True, title="🛑 EXECUTOR HALTED", color=COLOR_RED)
 
 
 # ============================================================================
@@ -637,7 +657,26 @@ def run(selftest: bool = False) -> None:
     save_state(state)
 
     if actions:
-        notify(f"**[Executor — {mode}]**\n```\n" + "\n".join(actions) + "\n```")
+        # Split real trade events from routine skips: trades get the loud
+        # treatment (@everyone + colored embed), skips stay plain.
+        TRADE_PREFIXES = ("EXECUTED", "EXIT ", "STOP FILLED",
+                          "ENTRY FAILED", "EXIT FAILED")
+        trade_events = [a for a in actions if a.startswith(TRADE_PREFIXES)]
+        routine = [a for a in actions if not a.startswith(TRADE_PREFIXES)]
+
+        if trade_events:
+            is_entry = any(a.startswith("EXECUTED") for a in trade_events)
+            has_fail = any("FAILED" in a for a in trade_events)
+            if has_fail:
+                title, color = "⚠️ ORDER PROBLEM — CHECK NOW", COLOR_RED
+            elif is_entry:
+                title, color = "🟢 TRADE EXECUTED — position opened", COLOR_GREEN
+            else:
+                title, color = "🔴 POSITION CLOSED", COLOR_RED
+            notify("\n\n".join(trade_events), urgent=True,
+                   title=f"{title}  [{mode}]", color=color)
+        if routine:
+            notify(f"**[Executor — {mode}]**\n```\n" + "\n".join(routine) + "\n```")
     else:
         print(f"  no executor actions (macro "
               f"{'ON' if macro_on else 'OFF'}, {len(ex_pos)} open, "

@@ -937,3 +937,39 @@ Tested 2026-07-31, same engine, same rule (OOS starred + >10% ann).
 - NO parameter changes, NO quantile changes, NO lookback tweaks before then. If it fails the 2027 re-run, permanent tombstone.
 
 Running tally across all factor research: 10 hypotheses tested, 1 shipped (RS filter), 1 in paper (carry), 8 rejected. The pipeline is empty again by design.
+
+---
+
+## 75. Why doesn't the system short during bear markets? (tested and rejected 2026-08-01)
+
+Tested in `walk_forward_v9.py`: a dedicated macro-OFF short sleeve — short 55d-low breakdowns in BOTTOM-quintile relative-strength coins (mirror of the validated long rules), funding-gated, BTC excluded.
+
+**Results (8 folds):**
+
+| Variant | n | exp_R | ann_ret |
+|---|---|---|---|
+| macro_on (live system, control) | 89 | +1.51 | **+26.96%** |
+| bear_shorts (the sleeve alone) | 27 | **−0.32** | **−1.70%** |
+| combined | 116 | +1.09 | +25.26% (worse than macro_on alone) |
+
+**Rejected 0-for-3 on the pre-committed rule.** Decisive detail: fold F1 (Sept 2022–Mar 2023, the deepest bear window in the sample — the sleeve's ideal habitat) still LOST −3.2%. Every fold was flat or negative. Bootstrap OOS CI [−0.71, +0.26], point estimate negative.
+
+**Interpretation:** weak-coin breakdowns in bear markets do not trend cleanly — they chop and squeeze; stop-outs and costs eat the edge. Simple Earn (~1.7-5% APY) strictly dominates bear-market shorting at our costs and timeframe. The 300+ day dormancy is not a missed opportunity; it is the correct allocation, now directly evidenced rather than assumed.
+
+**Do not revisit** without a structurally different short methodology (e.g., options-based, or intraday) — the daily-Donchian short family is exhausted. Fourth independent reproduction of the live system's edge (+1.5R) recorded in the same run.
+
+Final research tally: **11 hypotheses, 1 shipped, 1 in paper, 9 tombstoned.**
+
+---
+
+## 76. Why not pairs trading / statistical arbitrage? (tested and rejected 2026-08-02)
+
+Tested in `pairs_lab.py`: all 190 pairs from the top-20 liquid universe, rolling 90d formation (correlation >= 0.90, mean-reverting spread by AR(1)), z-score +/-2 entries, convergence/blowout/30d exits, full 4-leg costs (36bps).
+
+**Result: statistically significant NEGATIVE edge.** 2,607 episodes, mean net −1.14%, FULL CI [−1.81, −0.47] entirely below zero; OOS [−1.49, −0.09] likewise. Blowouts (1,452) outnumbered convergences (731) two-to-one: crypto spreads that open are usually structural repricings, not temporary dislocations. Even BTC/ETH — the most cointegrated pair available — netted +0.08%/episode: zero after costs.
+
+**The unifying lesson (third independent confirmation):** every mean-reversion structure tested in this project has failed — RSI reversion (0 valid), weekly cross-sectional reversal (significantly negative), and now pairs spread reversion (significantly negative). Crypto is a momentum market at every measurable level. Continuation wins; snap-back loses. Do not test a fourth mean-reversion variant without fundamentally different data (e.g., intraday microstructure).
+
+**On the fear of permanent dormancy** (the motivation for this test): macro regime history since 2019 — ON 64% of days; longest OFF streak ever 332 days (2022), current streak ~250 days (second longest); every OFF streak has resolved into ON periods of 130-562 days. Dormancy is seasonal, not terminal.
+
+Final research tally: **12 hypotheses, 1 shipped, 1 in paper, 10 tombstoned.**

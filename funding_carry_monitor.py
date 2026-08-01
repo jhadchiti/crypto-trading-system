@@ -34,6 +34,7 @@ import pandas as pd
 import os
 import urllib.request
 
+import secrets_local  # loads secrets.env into os.environ
 from funding import fetch_funding
 from market_data import fetch_all_perp_symbols, filter_by_history, fetch_24h_ticker_all
 

@@ -39,6 +39,7 @@ from pathlib import Path
 import pandas as pd
 import requests
 
+import secrets_local  # loads secrets.env into os.environ
 from net_utils import DEFAULT_HEADERS, FUTURES_HOSTS, SPOT_HOSTS
 
 STATE_FILE = Path("account_state.json")

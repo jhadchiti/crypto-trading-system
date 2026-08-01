@@ -27,6 +27,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
+import secrets_local  # loads secrets.env into os.environ
 LOG_FILE = Path("automation.log")
 HERE = Path(__file__).resolve().parent
 PYTHON = sys.executable   # use whichever python invoked this script
