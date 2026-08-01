@@ -1,0 +1,10 @@
+{
+  "live": true,
+  "risk_per_trade": 0.0075,
+  "max_notional_per_trade": 40.0,
+  "max_open_positions": 4,
+  "daily_loss_limit_pct": 5.0,
+  "leverage": 3,
+  "margin_type": "ISOLATED",
+  "price_sanity_pct": 2.0
+}

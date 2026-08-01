@@ -1,0 +1,28 @@
+# === NEVER COMMIT: personal financial state ===
+account_state.json
+equity_history.csv
+live_trades.csv
+live_trades_test_backup.csv
+executor_state.json
+alerter_state.json
+paper_carry_state.json
+paper_carry_log.csv
+last_dashboard_state.json
+deployment_state.json
+
+# === Operational noise ===
+automation.log
+alerts.log
+STOP_TRADING
+
+# === Bulky data cache (rebuilds itself from Binance) ===
+cache/
+
+# === Generated outputs (regenerate with the scripts) ===
+dashboard.html
+*_report.html
+
+# === Python ===
+__pycache__/
+*.pyc
+.venv/
