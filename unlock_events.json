@@ -1,0 +1,18 @@
+[
+  {
+    "symbol": "PROVEUSDT",
+    "unlock_date": "2026-08-05",
+    "pct_supply": 160.0,
+    "status": "open",
+    "registered": "2026-08-02T20:58:43.727125+00:00",
+    "entry_px": 0.1665,
+    "entry_time": "2026-08-02T20:58:49.218873+00:00"
+  },
+  {
+    "symbol": "KAITOUSDT",
+    "unlock_date": "2026-08-20",
+    "pct_supply": 13.5,
+    "status": "pending",
+    "registered": "2026-08-02T20:58:47.012281+00:00"
+  }
+]

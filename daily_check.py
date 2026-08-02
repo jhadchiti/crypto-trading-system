@@ -127,6 +127,9 @@ def main():
     # Non-critical: a failure here never blocks the exit code.
     carry_ok = run_step("carry_monitor", "funding_carry_monitor.py")
 
+    # Token-unlock shorts paper tracker (UNLOCK_SHORTS_SPEC.md). Advisory.
+    run_step("unlock_tracker", "unlock_tracker.py")
+
     # Account sync (read-only; runs only if API keys are configured).
     # Advisory: cross-checks exchange positions vs live_trades.csv.
     import os as _os
