@@ -664,15 +664,42 @@ def run(selftest: bool = False) -> None:
                 set_margin_and_leverage(s.symbol, cfg["leverage"], cfg["margin_type"])
                 res = place_entry(s.symbol, side, qty_str)
                 fill = float(res.get("avgPrice") or mp)
-                place_stop(s.symbol, side, stop_str)
-                append_entry(s.symbol, side, fill, float(qty_str), float(stop_str))
-                executed.add(sid)
-                n_open += 1
-                avail -= margin_needed
-                actions.append(f"EXECUTED {detail} — filled @ {fill}, "
-                               f"exchange stop placed")
             except Exception as e:
                 actions.append(f"ENTRY FAILED {s.symbol}: {e}")
+                continue
+
+            # NEVER leave a filled position without a stop (2026-08-02 audit):
+            # retry stop placement; if it cannot be placed, close the position
+            # immediately — flat is safe, naked overnight is not.
+            stop_ok = False
+            stop_err = None
+            for attempt in range(3):
+                try:
+                    place_stop(s.symbol, side, stop_str)
+                    stop_ok = True
+                    break
+                except Exception as e:
+                    stop_err = e
+                    time.sleep(2)
+            if not stop_ok:
+                try:
+                    close_position(s.symbol, side, qty_str)
+                    actions.append(
+                        f"ENTRY REVERSED {s.symbol}: filled @ {fill} but stop "
+                        f"placement failed 3x ({stop_err}) — position closed "
+                        f"immediately rather than held unprotected")
+                except Exception as e2:
+                    halt(f"{s.symbol}: position OPEN with NO STOP and close "
+                         f"failed ({e2}). MANUAL ACTION REQUIRED on Binance NOW.")
+                    return
+                continue
+
+            append_entry(s.symbol, side, fill, float(qty_str), float(stop_str))
+            executed.add(sid)
+            n_open += 1
+            avail -= margin_needed
+            actions.append(f"EXECUTED {detail} — filled @ {fill}, "
+                           f"exchange stop placed")
         else:
             executed.add(sid)
             actions.append(f"[DRY] would execute {detail}")

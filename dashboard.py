@@ -121,8 +121,16 @@ LAST_STATE = Path("last_dashboard_state.json")
 
 def fetch_recent(symbol: str, bars: int = 300) -> pd.DataFrame:
     end_ms = int(pd.Timestamp.now(tz="UTC").timestamp() * 1000)
-    start_ms = end_ms - (bars + 1) * 86400 * 1000
-    return bt.fetch_binance_klines(symbol, "1d", start_ms, end_ms)
+    start_ms = end_ms - (bars + 2) * 86400 * 1000
+    df = bt.fetch_binance_klines(symbol, "1d", start_ms, end_ms)
+    # CRITICAL (2026-08-02 audit): drop the still-forming daily bar. Signals
+    # must evaluate COMPLETED closes only — the backtest never saw partial
+    # bars, and on delayed runs the partial "close" is hours of unfinished
+    # price action that can reverse by the real close.
+    if not df.empty:
+        now = pd.Timestamp.now(tz="UTC")
+        df = df[df.index + pd.Timedelta(days=1) <= now]
+    return df
 
 
 def fetch_current_funding_bps(symbol: str) -> float:

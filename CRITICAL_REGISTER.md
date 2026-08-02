@@ -34,6 +34,13 @@ proved that unasked skeptical questions are where systems rot.*
 | **Fill-vs-signal geometry**: executor sizes off signal-close stop distance but fills at market minutes later; a gap shifts actual risk away from 0.75% | was up to ±2% price gap → risk up to ~1.5x intended on wide gaps | price-sanity tightened 2%→1% (2026-08-02); first live trades' fill-vs-signal slippage tracked in trade_reviews.csv — revisit after 10 fills |
 | Equity-history gaps (rows only on successful sync) bias ratio denominators slightly | small while uptime <100% | uptime tracked; ratios gated to 31d+ anyway |
 
+## RESOLVED IN THE 2026-08-02 EXPANSION SWEEP
+
+| Question | Finding | Fix |
+|---|---|---|
+| **Do signals evaluate a partial bar?** | YES — fetch_recent included the still-forming daily candle; on delayed runs its "close" was hours of unfinished price action the backtest never saw | fetch_recent now drops any bar that hasn't completed; signals evaluate completed closes only, matching backtest semantics exactly |
+| **Naked position if stop placement fails after entry fills?** | YES — a stop-order rejection left the position live, unprotected, and untracked until next sync | 3x stop retry; if all fail, position is closed immediately (flat is safe); if even the close fails, hard HALT + manual-action alert |
+
 ## MONITORING (known, unresolved, watched)
 
 | Question | Why it matters | Watch via |
@@ -44,6 +51,14 @@ proved that unasked skeptical questions are where systems rot.*
 | **Live-vs-backtest capture** — the master question; everything above is secondary to it | unknowable until ~20 trades | calibration panel |
 | **PROVE-style late entries** (T-2 vs T-10) in unlock trial dilute comparability to the entry-window design | small n trial gets noisier | note entry lag per event in the log |
 
+| **Stop trigger basis: backtest fires on candle LOW (last price); live stops fire on MARK price** | mark is smoother → live stops trigger *less* on wicks than backtest assumed (likely favorable, but a basis difference) | compare live stop fills vs candle lows in trade_reviews |
+| **Winner's curse on the RS filter**: rs_only was the best of 4 variants in one test — selection inflates its +69% uplift | expect live uplift meaningfully below +69%; not a reason to doubt direction, only magnitude | 20-trade calibration |
+| **Universe survivorship in headline numbers** (top-30 by CURRENT volume — validation admitted this) | live expectancy will run below the +45% OOS headline independent of execution quality | calibration vs the DISCOUNTED expectation (60-80% capture already assumes this) |
+| **Fold overlap**: all validation folds share BTC's regime as a common factor — effective sample < nominal n=90 | CIs are somewhat narrower than the truth; another reason gates stay strict | quarterly re-validation adds independent data |
+| **Clock drift**: >10s of Windows clock error breaks ALL signed calls (Binance -1021), looking like an outage | would show as executor+sync failing with -1021 | if -1021 appears in logs: `w32tm /resync` |
+| **Delisting risk**: Binance can delist a coin we hold; forced settlement at a bad print | rare on top-30 universe; universe filter reduces exposure | universe refresh drops delisting-bound symbols |
+| **Ledger residual blind spot**: an UNLOGGED deposit inflates the "yield" line silently (only negative residuals alarm) | attribution quality depends on flow-logging discipline | any yield-line jump > plausible interest = check for unlogged flow |
+
 ## ACCEPTED RISKS (eyes open, no fix planned)
 
 | Risk | Statement |
@@ -52,3 +67,6 @@ proved that unasked skeptical questions are where systems rot.*
 | **Single points of failure** | One laptop, one exchange, one VPN provider, one human. A failure of any pauses (not destroys) the system: stops live on-exchange, capital is recoverable via Binance directly, code is on GitHub. Accepted at current capital; revisit at $10k+ (VPS, second venue). |
 | **Regime dependence** | The entire directional edge lives in trending regimes. A permanently choppy crypto market (no precedent, but possible) would grind slow losses within validated drawdown bounds. The quarterly re-validation is the tripwire. |
 | **Small-sample everything** | $110, 0 live trades, 1 paper event. Every conclusion is provisional until samples exist. The gates enforce this; impatience is the threat model. |
+| **Webhook spoofing** | The Discord webhook URL was shared in a chat session; anyone holding it can post FAKE messages to the channel, including fake "TRADE EXECUTED" banners. Rule: NEVER act on a Discord message alone — verify against the dashboard or Binance before any manual response. Rotate the webhook if anything ever looks off. |
+| **Cloud-sync of secrets** | The project lives under C:\Users\Admin\Documents — a folder Windows often syncs to OneDrive. If sync is ON, secrets.env and all financial state files are silently copied to Microsoft's cloud. OPERATOR CHECK REQUIRED: confirm OneDrive is not syncing this folder (File Explorer → folder icon has no cloud/checkmark overlay), or exclude it. |
+| **Dead-man's switch is the operator** | If Task Scheduler silently dies (Windows update, task disabled), nothing alerts — the signal is the ABSENCE of the daily digest. Standing rule: two consecutive mornings without a digest = investigate immediately. Absence of news is itself an alarm. |
