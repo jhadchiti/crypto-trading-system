@@ -100,10 +100,14 @@ PORTFOLIO_HEAT_CAP = 0.03
 FUNDING_LIMIT_BPS = 20.0
 ADX_THRESHOLD = 25.0
 
-# Updated backtest expectations from walk_forward_v6 static_top_30
-BACKTEST_WIN_RATE = 0.309
-BACKTEST_EXPECTANCY_R = 0.86
-BACKTEST_TRADES_PER_MONTH = 6.0
+# Backtest expectations for the SHIPPED variant (walk_forward_v7 rs_only,
+# validated 2026-07-31): OOS exp_R +1.31 aggregate; win 30%.
+BACKTEST_WIN_RATE = 0.30
+BACKTEST_EXPECTANCY_R = 1.31
+BACKTEST_TRADES_PER_MONTH = 4.0   # RS filter cuts trade count ~40%
+# Carry paper-trial reference (funding_carry_backtest 2026-07-31)
+CARRY_BT_WIN = 0.81
+CARRY_BT_MEDIAN_BPS = 198.0
 
 ALERTS_LOG = Path("alerts.log")
 LIVE_TRADES = Path("live_trades.csv")
@@ -604,7 +608,8 @@ def cal_status(live: dict, exp_win: float, exp_exp: float) -> tuple[str, str]:
 
 def fmt_money(x):
     if x is None or (isinstance(x, float) and math.isnan(x)): return "—"
-    return f"${x:,.0f}"
+    # cents matter below $10k (at $110, a whole-dollar display hides real moves)
+    return f"${x:,.2f}" if abs(x) < 10_000 else f"${x:,.0f}"
 
 
 def fmt_pct(x, signed=True, decimals=2):
@@ -838,6 +843,14 @@ def render_html(state: dict) -> str:
     # === Section 7: What changed ===
     changed_rows = "".join(f"<li>{e}</li>" for e in state["changed"])
 
+    # === Metrics vs Targets ===
+    m_rows = []
+    for m in state.get("metrics_rows", []):
+        cls = {"ok": "pnl-pos", "warn": "v-block", "gated": "muted"}.get(m["status"], "muted")
+        m_rows.append(f"<tr><td>{m['sleeve']}</td><td>{m['metric']}</td>"
+                      f"<td class='{cls}'>{m['value']}</td><td>{m['target']}</td></tr>")
+    metrics_body = "".join(m_rows) or '<tr><td colspan="4" class="muted">no data</td></tr>'
+
     # === Section 8: Risk exposure ===
     risk_card = f"""
     <div class="card">
@@ -1025,6 +1038,14 @@ tr:hover td {{ background: #1a2330; }}
 
 {cal_card}
 
+<div class="card">
+  <h2>Metrics vs Targets (leading-trader view — grey = insufficient sample, judge nothing early)</h2>
+  <table>
+    <thead><tr><th>sleeve</th><th>metric</th><th>live value</th><th>target / rule</th></tr></thead>
+    <tbody>{metrics_body}</tbody>
+  </table>
+</div>
+
 <div class="row-2">
   {universe_card}
   {alerts_card}
@@ -1049,6 +1070,111 @@ def days_in_current_state(s):
     if len(last_flip) == 0:
         return len(s)
     return int((s.index[-1] - last_flip[-1]).days)
+
+
+# ============================================================================
+# Metrics vs Targets (leading-trader monitoring, sample-size gated)
+# ============================================================================
+
+def build_metrics_rows(closed_df: pd.DataFrame, ops: dict) -> list[dict]:
+    """Each row: sleeve, metric, value, target, status (ok/warn/gated).
+    BEST PRACTICE: metrics below minimum sample size are GATED — displayed
+    grey with progress, never colored. Numbers before minimum n are noise."""
+    rows = []
+
+    def add(sleeve, metric, value, target, status):
+        rows.append({"sleeve": sleeve, "metric": metric, "value": value,
+                     "target": target, "status": status})
+
+    # ---- Trend (min n = 20 live trades) ----
+    n = len(closed_df) if closed_df is not None and not closed_df.empty else 0
+    if n < 20:
+        add("Trend", "expectancy / win / payoff / capture",
+            f"gated — {n}/20 trades", "judge at n>=20", "gated")
+    else:
+        r = pd.to_numeric(closed_df["r_multiple"], errors="coerce").dropna()
+        exp_r = float(r.mean())
+        win = float((r > 0).mean())
+        wins, losses = r[r > 0], r[r <= 0]
+        payoff = (float(wins.mean() / abs(losses.mean()))
+                  if len(wins) and len(losses) and losses.mean() != 0 else float("nan"))
+        capture = exp_r / BACKTEST_EXPECTANCY_R
+        add("Trend", "Expectancy (R/trade)", f"{exp_r:+.2f}R",
+            f">= {0.9*BACKTEST_EXPECTANCY_R:.2f}R",
+            "ok" if exp_r >= 0.9 * BACKTEST_EXPECTANCY_R else "warn")
+        add("Trend", "Win rate", f"{win:.0%}", "20-50% band",
+            "ok" if 0.20 <= win <= 0.50 else "warn")
+        add("Trend", "Payoff ratio", f"{payoff:.1f}x", ">= 2.0x",
+            "ok" if payoff >= 2.0 else "warn")
+        add("Trend", "Backtest capture", f"{capture:.0%}", ">= 60%",
+            "ok" if capture >= 0.60 else "warn")
+
+    # ---- Carry (min n = 10 closed paper episodes) ----
+    cn = ops.get("carry_closed_n", 0)
+    if cn < 10:
+        add("Carry", "win rate / mean bps", f"gated — {cn}/10 episodes",
+            "judge at n>=10", "gated")
+    else:
+        cw = ops.get("carry_win_rate") or 0.0
+        cmean = (ops.get("carry_closed_net", 0.0) / cn) if cn else 0.0
+        add("Carry", "Episode win rate", f"{cw:.0%}",
+            f">= 65% (backtest {CARRY_BT_WIN:.0%})",
+            "ok" if cw >= 0.65 else "warn")
+        add("Carry", "Mean net/episode", f"{cmean:+.0f}bps",
+            f"backtest median {CARRY_BT_MEDIAN_BPS:.0f}bps",
+            "ok" if cmean > 0 else "warn")
+
+    # ---- Unlock events (verdict at n = 10) ----
+    try:
+        uev = json.loads(Path("unlock_events.json").read_text(encoding="utf-8"))
+    except Exception:
+        uev = []
+    done = [e for e in uev if e.get("status") in ("completed", "stopped")]
+    if len(done) < 10:
+        open_n = sum(1 for e in uev if e.get("status") == "open")
+        wins_so_far = sum(1 for e in done if e.get("net_pct", 0) > 0)
+        add("Unlocks", "trial progress",
+            f"{len(done)}/10 done ({wins_so_far} wins), {open_n} open",
+            "verdict at 10", "gated")
+    else:
+        w10 = sum(1 for e in done[:10] if e.get("net_pct", 0) > 0)
+        m10 = sum(e.get("net_pct", 0) for e in done[:10]) / 10
+        add("Unlocks", "Hit rate (10 events)", f"{w10}/10",
+            ">=7 promote, <=4 tombstone",
+            "ok" if w10 >= 7 else "warn")
+        add("Unlocks", "Mean net/event", f"{m10:+.2f}%", "> +1.0%",
+            "ok" if m10 > 1.0 else "warn")
+    stops = sum(1 for e in done if e.get("status") == "stopped")
+    if done and stops > 3:
+        add("Unlocks", "Stop frequency", f"{stops} stopped",
+            "<= 3 of 10 (crowding check)", "warn")
+
+    # ---- Book level ----
+    try:
+        eh = pd.read_csv("equity_history.csv")
+        if len(eh) >= 7:
+            eq = eh["total"].astype(float)
+            dd = float(((eq - eq.cummax()) / eq.cummax()).min() * 100)
+            add("Book", "Total-equity max DD", f"{dd:.1f}%",
+                "> -15% (act at -10%)",
+                "ok" if dd > -10 else "warn")
+        else:
+            add("Book", "Total-equity max DD",
+                f"gated — {len(eh)}/7 days of history", "needs history", "gated")
+    except Exception:
+        add("Book", "Total-equity max DD", "no equity_history.csv yet",
+            "needs history", "gated")
+
+    hr, ho = ops.get("health_runs", 0), ops.get("health_ok", 0)
+    if hr:
+        pct = ho / hr * 100
+        add("Book", "Automation uptime (14d)", f"{ho}/{hr} ({pct:.0f}%)",
+            ">= 90%", "ok" if pct >= 90 else "warn")
+    n_issues = len(ops.get("acct_issues", []))
+    add("Book", "Reconciliation mismatches", str(n_issues), "always 0",
+        "ok" if n_issues == 0 else "warn")
+
+    return rows
 
 
 # ============================================================================
@@ -1178,7 +1304,10 @@ def main():
 
     btc_df = symbol_data["BTCUSDT"]
     btc_rel = {s: (btc_relative_return(symbol_data[s], btc_df)
-                   if s != "BTCUSDT" and isinstance(symbol_data.get(s), pd.DataFrame) else None)
+                   if (s != "BTCUSDT"
+                       and isinstance(symbol_data.get(s), pd.DataFrame)
+                       and not symbol_data[s].empty
+                       and "close" in symbol_data[s].columns) else None)
                for s in SYMBOLS}
 
     btc_regime = wf3.compute_btc_regime(btc_df)
@@ -1274,6 +1403,7 @@ def main():
         "rs_set": compute_top_quintile_rs(symbol_data) if USE_REL_STRENGTH else set(),
         "ops": collect_ops(),
     }
+    state["metrics_rows"] = build_metrics_rows(closed_df, state["ops"])
 
     html = render_html(state)
     out = Path("dashboard.html")
