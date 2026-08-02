@@ -5,6 +5,7 @@ secrets.env
 sleeve_ledger.json
 unlock_events.json
 paper_carry_log.csv
+discipline_audit.json
 account_state.json
 trade_reviews.csv
 decision_journal.jsonl

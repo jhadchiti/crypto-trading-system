@@ -57,7 +57,27 @@ ANY of these closes the position at the next Daily close:
 | `atr_stop` | Price hits initial stop at 2 × ATR(20) from entry. |
 | `time_stop` | Position open ≥ 90 days. |
 
-Stops are placed at entry and **never moved adversely**. They trail favorably after +1R and +2R (see playbook).
+Stops are placed at entry and **never moved — in either direction**. (An earlier draft of this answer described +1R/+2R trailing; that was never implemented, never validated, and the 2026-08-02 exit audit confirmed it wouldn't help: only 1 of 48 stopped-out trades ever reached +2R first. The fixed-stop + channel-exit combination IS the validated design — see Q5b.)
+
+---
+
+## 5b. Are the exits actually good? (audited 2026-08-02)
+
+Full exit audit: logic unit-tested 4/4 (channel fires correctly, ATR stop honors intraday lows, conservative stop-before-channel ordering, 90d time stop), then all 90 validated OOS trades replayed bar-by-bar against raw data:
+
+| Exit type | n | avg R | total |
+|---|---|---|---|
+| atr_stop | 48 | −1.02 | −48.9R (stops doing exactly their job) |
+| channel_exit | 40 | +3.28 | +131.4R (winners running) |
+| time_stop | 2 | +17.8 | +35.6R |
+
+**Key findings:**
+- Median MFE capture is only 17% (median trade touches +2.78R, realizes +0.57R). This LOOKS bad but is the price of the fat tail: a hard +2R take-profit collapses the system from **+118R to +4R**, because the 7 monster trades (+145R combined) ARE the system. Giveback is not a flaw; it is the fee for never capping a monster.
+- Stops are NOT too tight: 0% of eventual winners came within 0.4R of stopping out.
+- Breakeven-stop-after-+2R tested: rescues 1 trade of 48 (+1R of 118R). Rejected without spending a walk-forward — the MFE data killed it.
+- Only half of stopped losers ever saw +0.5R; they were mostly dead on arrival, which is what a 30%-win-rate system's losers should look like.
+
+**Conclusion: the exit stack is near-optimal for this strategy class. Do not add take-profits, do not trail, do not tighten. Every intuitive "improvement" to these exits destroys the tail that pays for everything.**
 
 ---
 

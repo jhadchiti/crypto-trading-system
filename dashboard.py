@@ -879,6 +879,40 @@ def render_html(state: dict) -> str:
                    '<tr><td colspan="5" class="muted">no open positions — '
                    'panel activates with the first trade</td></tr>')
 
+    # --- Cost of Discipline panel (blocked-signal receipts) ---
+    disc = _read_json("discipline_audit.json")
+    if disc.get("active"):
+        verdict_good = disc.get("closed_total_r", 0) < 0
+        head_cls = "pnl-pos" if verdict_good else "v-block"
+        head = (f"taking every blocked signal since {disc.get('off_start')} would be "
+                f"{disc.get('closed_total_r', 0):+.1f}R = "
+                f"{disc.get('dollars_if_taken', 0):+.2f}$ "
+                f"(vs +{disc.get('earn_alt', 0):.2f}$ in Simple Earn)")
+        oh_rows = "".join(
+            f"<tr><td>{t['sym']}</td><td>{t['side']}</td><td>{t['since']}</td>"
+            f"<td class='{'pnl-pos' if t['r'] >= 0 else 'pnl-neg'}'>{t['r']:+.2f}R</td></tr>"
+            for t in disc.get("open_hypotheticals", []))
+        discipline_card = f"""
+    <div class="card">
+      <h2>Cost of Discipline — what the blocked signals actually did</h2>
+      <div class="{head_cls}" style="font-size:14px;font-weight:600;">{head}</div>
+      <div class="kpi-s" style="margin:6px 0;">
+        {disc.get('n_closed', 0)} closed hypotheticals (win {disc.get('closed_win', 0) or 0:.0%}):
+        longs {disc.get('longs_r', 0):+.1f}R, shorts {disc.get('shorts_r', 0):+.1f}R.
+        Still-open hypotheticals below are the SURVIVORS — losers already stopped
+        out and left the screen. That asymmetry is why blocked signals always
+        look like missed money.</div>
+      <table>
+        <thead><tr><th>open hypothetical</th><th>side</th><th>since</th><th>mark</th></tr></thead>
+        <tbody>{oh_rows or '<tr><td colspan=4 class=muted>none open</td></tr>'}</tbody>
+      </table>
+    </div>"""
+    elif disc:
+        discipline_card = ('<div class="card"><h2>Cost of Discipline</h2>'
+                           '<div class="kpi-s">macro ON — panel dormant (no blocked signals to audit)</div></div>')
+    else:
+        discipline_card = ""
+
     # --- upcoming events calendar ---
     cal_rows = "".join(
         f"<tr><td>{d.strftime('%b %d')}</td><td>{'%+dd' % (d - pd.Timestamp.now(tz='UTC')).days}</td><td>{lbl}</td></tr>"
@@ -1153,6 +1187,8 @@ tr:hover td {{ background: #1a2330; }}
     </table>
   </div>
 </div>
+
+{discipline_card}
 
 <div class="row-2">
   {unlock_card}

@@ -69,8 +69,14 @@ def advanced_rows(closed_df: pd.DataFrame | None = None) -> list[dict]:
                 d = str(dates.iloc[i].date())
                 flow = fmap.get(d, 0.0)
                 prev = eq.iloc[i - 1]
-                if prev > 0:
-                    twr *= (eq.iloc[i] - flow) / prev
+                if prev <= 0:
+                    continue
+                adj = eq.iloc[i] - flow
+                # guard: if the flow-adjusted factor is absurd (deposit logged
+                # on a day the equity snapshot missed it), fall back to raw
+                if flow != 0 and (adj <= 0 or abs(adj / prev - 1) > 0.5):
+                    adj = eq.iloc[i]
+                twr *= adj / prev
             twr_ann = (twr ** (365 / n) - 1) * 100
             rows.append(_row("Risk", "TWR (ann., deposit-adjusted)",
                              f"{twr_ann:+.1f}%",

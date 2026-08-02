@@ -130,6 +130,9 @@ def main():
     # Token-unlock shorts paper tracker (UNLOCK_SHORTS_SPEC.md). Advisory.
     run_step("unlock_tracker", "unlock_tracker.py")
 
+    # Cost-of-discipline audit (blocked-signal receipts). Advisory.
+    run_step("discipline_audit", "discipline_audit.py")
+
     # Account sync (read-only; runs only if API keys are configured).
     # Advisory: cross-checks exchange positions vs live_trades.csv.
     import os as _os
