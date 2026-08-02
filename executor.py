@@ -69,7 +69,7 @@ DEFAULT_CONFIG = {
     "daily_loss_limit_pct": 5.0,
     "leverage": 3,
     "margin_type": "ISOLATED",
-    "price_sanity_pct": 2.0,
+    "price_sanity_pct": 1.0,
 }
 
 
