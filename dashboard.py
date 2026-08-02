@@ -1315,20 +1315,57 @@ def build_metrics_rows(closed_df: pd.DataFrame, ops: dict) -> list[dict]:
         add("Unlocks", "Stop frequency", f"{stops} stopped",
             "<= 3 of 10 (crowding check)", "warn")
 
-    # ---- Book level ----
+    # ---- Trend: profit factor (needs 20 trades like the rest) ----
+    if n >= 20:
+        r = pd.to_numeric(closed_df["r_multiple"], errors="coerce").dropna()
+        gw, gl = float(r[r > 0].sum()), abs(float(r[r <= 0].sum()))
+        pf = gw / gl if gl > 0 else float("inf")
+        add("Trend", "Profit factor", f"{pf:.2f}", ">= 1.5",
+            "ok" if pf >= 1.5 else "warn")
+
+    # ---- Book level: risk-adjusted ratios (gated on equity history) ----
     try:
         eh = pd.read_csv("equity_history.csv")
-        if len(eh) >= 7:
-            eq = eh["total"].astype(float)
+        eq = eh["total"].astype(float)
+        n_days = len(eh)
+        if n_days >= 7:
             dd = float(((eq - eq.cummax()) / eq.cummax()).min() * 100)
             add("Book", "Total-equity max DD", f"{dd:.1f}%",
-                "> -15% (act at -10%)",
-                "ok" if dd > -10 else "warn")
+                "> -15% (act at -10%)", "ok" if dd > -10 else "warn")
         else:
             add("Book", "Total-equity max DD",
-                f"gated — {len(eh)}/7 days of history", "needs history", "gated")
+                f"gated — {n_days}/7 days of history", "needs history", "gated")
+
+        # Sharpe / Sortino / Calmar: need >= 30 daily observations
+        if n_days < 31:
+            add("Book", "Sharpe / Sortino / Calmar",
+                f"gated — {n_days}/31 days of equity history",
+                "ratios on tiny samples are noise", "gated")
+        else:
+            rets = eq.pct_change().dropna()
+            mu, sd = float(rets.mean()), float(rets.std())
+            sharpe = mu / sd * math.sqrt(365) if sd > 0 else float("nan")
+            downside = rets[rets < 0]
+            dsd = float(downside.std()) if len(downside) > 1 else float("nan")
+            sortino = (mu / dsd * math.sqrt(365)
+                       if dsd and not math.isnan(dsd) and dsd > 0 else float("nan"))
+            ann_ret = float((eq.iloc[-1] / eq.iloc[0]) ** (365 / n_days) - 1) * 100
+            dd_abs = abs(float(((eq - eq.cummax()) / eq.cummax()).min() * 100))
+            calmar = ann_ret / dd_abs if dd_abs > 0.01 else float("nan")
+            add("Book", "Sharpe (ann., daily equity)", f"{sharpe:.2f}",
+                "> 1.0 good, > 1.5 elite", "ok" if sharpe >= 1.0 else "warn")
+            if not math.isnan(sortino):
+                add("Book", "Sortino (ann.)", f"{sortino:.2f}",
+                    "> 1.5 (trend upside-vol is the product)",
+                    "ok" if sortino >= 1.5 else "warn")
+            if not math.isnan(calmar) and n_days >= 90:
+                add("Book", "Calmar (ann ret / max DD)", f"{calmar:.2f}",
+                    "> 1.0 (CTA elite); needs 90d+", "ok" if calmar >= 1.0 else "warn")
+            elif n_days < 90:
+                add("Book", "Calmar", f"gated — {n_days}/90 days",
+                    "needs a real drawdown history", "gated")
     except Exception:
-        add("Book", "Total-equity max DD", "no equity_history.csv yet",
+        add("Book", "Risk-adjusted ratios", "no equity_history.csv yet",
             "needs history", "gated")
 
     hr, ho = ops.get("health_runs", 0), ops.get("health_ok", 0)
@@ -1729,6 +1766,11 @@ def main():
         "ops": collect_ops(),
     }
     state["metrics_rows"] = build_metrics_rows(closed_df, state["ops"])
+    try:
+        from analytics import advanced_rows
+        state["metrics_rows"] += advanced_rows(closed_df)
+    except Exception as e:
+        print(f"  WARN analytics: {e}")
     state["closed_df"] = closed_df
 
     # data staleness alarm: if the latest BTC candle is old, every signal is suspect
