@@ -13,6 +13,11 @@ proved that unasked skeptical questions are where systems rot.*
    "monitoring" item, attempt to falsify one "accepted" item.
 3. Any surprise in live behavior — first stop is this document: was it a
    known weakness? If not, it gets added with a post-mortem.
+4. TWO LENSES, always: the ENGINEER'S sweep (is the code doing what was
+   validated?) and the TRADER'S sweep (what is the book actually exposed to,
+   what does current positioning assume about the market, which two sleeves
+   could collide, and what will the next decision feel like vs what the
+   evidence says?). An audit that only ran one lens is half an audit.
 
 ## RESOLVED (audited, receipts on file)
 
@@ -58,6 +63,16 @@ proved that unasked skeptical questions are where systems rot.*
 | **Clock drift**: >10s of Windows clock error breaks ALL signed calls (Binance -1021), looking like an outage | would show as executor+sync failing with -1021 | if -1021 appears in logs: `w32tm /resync` |
 | **Delisting risk**: Binance can delist a coin we hold; forced settlement at a bad print | rare on top-30 universe; universe filter reduces exposure | universe refresh drops delisting-bound symbols |
 | **Ledger residual blind spot**: an UNLOGGED deposit inflates the "yield" line silently (only negative residuals alarm) | attribution quality depends on flow-logging discipline | any yield-line jump > plausible interest = check for unlogged flow |
+
+## TRADER'S REGISTER (market-level, added 2026-08-02 — reviewed with the book, not the code)
+
+| Item | Read | Pre-commitment |
+|---|---|---|
+| PROVE short entered T-2, uncrowded funding on a fully telegraphed 160% unlock | possible trap: anticipatory move missed; uncrowded obvious trades often mean pre-absorption/OTC | ride the rule; critique logged BEFORE outcome (Aug 9) so the trial teaches either way |
+| KAITO: trend's top RS leader AND unlock sleeve's next short (Aug 10 window) | cross-sleeve conflict if macro flips before late Aug; spec only blocks one direction of the clash | paper: allow (it's information). BEFORE unlock-sleeve promotion: add rule — no unlock short where trend has an entry-eligible signal, trend priority |
+| First post-flip entries will FEEL like chasing (wide ATRs, coins already ran) | that feeling is the validated entry point; the no-macro "early" variant loses | first signals after the flip taken at full size, no hesitation |
+| Capital contention: carry go-live (Sept 1) may coincide with trend waking | $110 cannot fund both sleeves | PRE-REGISTERED: trend gets 100% of capital; carry stays paper until equity > $300. AND: zero August carry episodes → Sept 1 verdict is EXTEND, never go-live on backtest alone |
+| Idle $50 futures margin earns 0% (~45% of AUM) | considered thinning to $25 + top-up on flip alert; yield gain ≈ $0.35/yr vs missed-entry risk | REJECTED — idle margin is cheap insurance; logged as example of killing small-number optimizations |
 
 ## ACCEPTED RISKS (eyes open, no fix planned)
 
