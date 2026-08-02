@@ -74,6 +74,28 @@ proved that unasked skeptical questions are where systems rot.*
 | Capital contention: carry go-live (Sept 1) may coincide with trend waking | $110 cannot fund both sleeves | PRE-REGISTERED: trend gets 100% of capital; carry stays paper until equity > $300. AND: zero August carry episodes → Sept 1 verdict is EXTEND, never go-live on backtest alone |
 | Idle $50 futures margin earns 0% (~45% of AUM) | considered thinning to $25 + top-up on flip alert; yield gain ≈ $0.35/yr vs missed-entry risk | REJECTED — idle margin is cheap insurance; logged as example of killing small-number optimizations |
 
+## THE SIZING LADDER (pre-registered 2026-08-02 — BINDING)
+
+Risk per trade is earned by evidence, never by desire, impatience, or a good
+week. Decided while flat and calm; no renegotiation mid-drawdown or mid-streak.
+
+| Step | Risk/trade | Unlock condition (ALL required) |
+|---|---|---|
+| 0 (now) | **0.75%** | — (the proving level: first 20 live trades) |
+| 1 | **1.00%** | ≥20 closed live trades AND live capture ≥ 60% of backtest expectancy AND max-DD within cone |
+| 2 | **1.50%** | ≥50 closed live trades AND profile intact (win rate 20-50%, payoff ≥2x, skew > 0) |
+| CEILING | **2.00%** | lifetime hard cap = quarter-Kelly of the DISCOUNTED edge. Never exceeded for any reason, at any equity, after any winning streak. |
+
+Rules of the ladder:
+- Steps go UP only via the table. Steps go DOWN immediately if: live capture
+  falls below 50%, OR equity drawdown exceeds −10% (drop one step), OR −15%
+  (return to 0.75% and trigger re-validation).
+- A ladder change is a journal entry (decision_journal.py) at the moment of change.
+- Why 5% was rejected (for the record): discounted Kelly ≈ 6-8%, quarter-Kelly
+  ≈ 1.5-2%; at 5% the NORMAL p5 path is a −42% drawdown and a routine 7-loss
+  streak is −30% — the guaranteed psychological conditions for abandoning a
+  working system at its low. Full analysis: chat 2026-08-02.
+
 ## ACCEPTED RISKS (eyes open, no fix planned)
 
 | Risk | Statement |

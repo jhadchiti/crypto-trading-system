@@ -185,6 +185,15 @@ def load_config() -> dict:
             pass
     else:
         CONFIG_FILE.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+    # SIZING LADDER CEILING (CRITICAL_REGISTER.md, binding 2026-08-02):
+    # risk per trade is hard-capped at 2% IN CODE. If the config ever asks
+    # for more, it is clamped and loudly reported. The ladder goes up only
+    # by evidence; no config edit can bypass quarter-Kelly.
+    if cfg.get("risk_per_trade", 0.0075) > 0.02:
+        print(f"  WARN: risk_per_trade {cfg['risk_per_trade']:.2%} exceeds the "
+              f"2% lifetime ceiling (CRITICAL_REGISTER sizing ladder) — clamped.",
+              file=sys.stderr)
+        cfg["risk_per_trade"] = 0.02
     return cfg
 
 
