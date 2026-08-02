@@ -2,6 +2,9 @@
 secrets.env
 
 # === NEVER COMMIT: personal financial state ===
+sleeve_ledger.json
+unlock_events.json
+paper_carry_log.csv
 account_state.json
 equity_history.csv
 live_trades.csv

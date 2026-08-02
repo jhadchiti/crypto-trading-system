@@ -139,6 +139,9 @@ def main():
         sync_ok = True
         log("SKIP account_sync (BINANCE_API_KEY not set)")
 
+    # Daily digest to Discord (dashboard summary + html attachment). Advisory.
+    run_step("digest", "dashboard_digest.py")
+
     log(f"daily_check complete (alerter={'OK' if alerter_ok else 'FAIL'}, "
         f"executor={'OK' if executor_ok else 'FAIL'}, "
         f"dashboard={'OK' if dashboard_ok else 'FAIL'}, "

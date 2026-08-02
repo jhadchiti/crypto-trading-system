@@ -150,7 +150,7 @@ def public_price(symbol: str) -> float | None:
 # ============================================================================
 
 def fetch_futures() -> dict:
-    """USD-M futures wallet + open positions."""
+    """USD-M futures wallet + open positions (with liquidation distance)."""
     acct = signed_get(FUTURES_HOSTS, "/fapi/v2/account")
     positions = [
         {
@@ -163,6 +163,23 @@ def fetch_futures() -> dict:
         for p in acct.get("positions", [])
         if abs(float(p.get("positionAmt", 0))) > 0
     ]
+    # enrich with liquidation price + mark price (positionRisk endpoint)
+    if positions:
+        try:
+            risk = signed_get(FUTURES_HOSTS, "/fapi/v2/positionRisk")
+            rmap = {r["symbol"]: r for r in risk if abs(float(r.get("positionAmt", 0))) > 0}
+            for p in positions:
+                r = rmap.get(p["symbol"])
+                if not r:
+                    continue
+                liq = float(r.get("liquidationPrice", 0) or 0)
+                mark = float(r.get("markPrice", 0) or 0)
+                p["liq_price"] = liq
+                p["mark_price"] = mark
+                if liq > 0 and mark > 0:
+                    p["liq_dist_pct"] = round(abs(mark - liq) / mark * 100, 1)
+        except Exception as e:
+            print(f"  WARN positionRisk: {e}", file=sys.stderr)
     return {
         "wallet_usdt": float(acct.get("totalWalletBalance", 0)),
         "unrealized_pnl": float(acct.get("totalUnrealizedProfit", 0)),
@@ -349,6 +366,13 @@ def main():
                     + funding_w.get("total_usd", 0.0))
 
     issues = cross_check(fut.get("positions", []))
+    # liquidation proximity warnings (margin call is an emergency, not a log line)
+    for p in fut.get("positions", []):
+        dist = p.get("liq_dist_pct")
+        if dist is not None and dist < 30.0:
+            issues.append(f"LIQUIDATION RISK: {p['side']} {p['symbol']} is "
+                          f"{dist:.1f}% from liquidation (mark {p.get('mark_price')}, "
+                          f"liq {p.get('liq_price')}) — add margin or reduce")
 
     state = {
         "synced_at": now,

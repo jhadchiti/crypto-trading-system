@@ -818,6 +818,41 @@ def render_html(state: dict) -> str:
       </table>
     </div>"""
 
+    # --- sleeve P&L attribution ---
+    try:
+        import ledger
+        att = ledger.attribution()
+    except Exception:
+        att = None
+    if att and att.get("equity") is not None:
+        def att_row(label, v, note=""):
+            c = "pnl-pos" if v >= 0 else "pnl-neg"
+            return (f"<tr><td>{label}</td><td class='{c}'>{v:+.2f}$</td>"
+                    f"<td class='muted'>{note}</td></tr>")
+        resid_note = ("Simple Earn interest + rounding"
+                      if att["yield_resid"] >= -1.0 else
+                      "NEGATIVE — unexplained leak, investigate!")
+        att_body = (
+            att_row("Trend (realized)", att["trend_realized"],
+                    f"{att['n_trades']} closed trades")
+            + att_row("Trend (unrealized)", att["trend_unrealized"], "open futures uPnL")
+            + att_row("Carry", att["carry_live"], "paper until Sept 1")
+            + att_row("Unlock shorts", att["unlock_live"], "paper trial")
+            + att_row("Yield + residual", att["yield_resid"], resid_note))
+        attribution_card = f"""
+    <div class="card">
+      <h2>P&L Attribution by Sleeve (since inception {ledger.INCEPTION_DATE},
+          ${att['inception']:.2f} + {att['deposits']:+.2f} deposits)</h2>
+      <table>
+        <thead><tr><th>sleeve</th><th>P&L</th><th>note</th></tr></thead>
+        <tbody>{att_body}</tbody>
+      </table>
+      <div class="kpi-s" style="margin-top:6px;">Log every deposit:
+        <code>python ledger.py deposit AMOUNT</code> — attribution breaks otherwise.</div>
+    </div>"""
+    else:
+        attribution_card = ""
+
     # --- upcoming events calendar ---
     cal_rows = "".join(
         f"<tr><td>{d.strftime('%b %d')}</td><td>{'%+dd' % (d - pd.Timestamp.now(tz='UTC')).days}</td><td>{lbl}</td></tr>"
@@ -1096,6 +1131,8 @@ tr:hover td {{ background: #1a2330; }}
   {unlock_card}
   {calendar_card}
 </div>
+
+{attribution_card}
 
 <div class="card">
   <h2>Open Positions (with lifecycle)</h2>
