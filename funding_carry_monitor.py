@@ -223,6 +223,11 @@ def main():
 
     state["open"] = open_pos
     state["last_run"] = now_iso
+    # persist distance-to-trigger for the dashboard
+    if trail_by_sym:
+        best_sym, (best_tm, _) = max(trail_by_sym.items(), key=lambda kv: kv[1][0])
+        state["best_trail_bps"] = round(best_tm, 2)
+        state["best_trail_symbol"] = best_sym
     save_state(state)
 
     if actions:

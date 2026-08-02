@@ -634,6 +634,27 @@ def verdict_class(v):
 def render_html(state: dict) -> str:
     K = state["kpis"]; R = state["regime_states"]; mo = state["market"]
     rs = state["risk"]; cal = state["cal"]; dep = state["deployment"]
+    ops = state.get("ops", {})
+
+    # === Section 0: operator action banner + today's P&L + sparkline ===
+    b_cls, b_head, b_detail = build_action_banner(state)
+    banner = (f'<div class="reg-card {b_cls}" style="margin-bottom:14px;">'
+              f'<div class="reg-v">{b_head}</div>'
+              f'<div class="reg-s">{b_detail}</div></div>')
+
+    eq_hist = ops.get("eq_hist", [])
+    d_usd, d_pct, d_span = today_delta(eq_hist)
+    if d_usd is None:
+        today_cell = ('<div class="kpi-cell"><div class="kpi-l">Today\'s P&L</div>'
+                      '<div class="kpi-v muted">—</div>'
+                      '<div class="kpi-s">needs 2 days of equity history</div></div>')
+    else:
+        cls = "pnl-pos" if d_usd >= 0 else "pnl-neg"
+        today_cell = (f'<div class="kpi-cell"><div class="kpi-l">Today\'s P&L</div>'
+                      f'<div class="kpi-v {cls}">{d_usd:+.2f}$</div>'
+                      f'<div class="kpi-s">{d_pct:+.2f}% · {d_span}</div></div>')
+    spark_cell = (f'<div class="kpi-cell"><div class="kpi-l">Equity (60d)</div>'
+                  f'<div style="margin-top:6px;">{equity_spark_svg(eq_hist)}</div></div>')
 
     # === Section 1: Performance KPI strip ===
     excess = K.get("excess_vs_btc")
@@ -666,6 +687,8 @@ def render_html(state: dict) -> str:
         <div class="kpi-v {excess_cls}">{excess_str}</div>
         <div class="kpi-s">BTC: {btc_pct_str}</div>
       </div>
+      {today_cell}
+      {spark_cell}
     </div>
     """
 
@@ -749,13 +772,64 @@ def render_html(state: dict) -> str:
 
     n_carry = len(ops.get("carry_open", {}))
     carry_wr = ops.get("carry_win_rate")
-    carry_sub = (f"{ops.get('carry_closed_n', 0)} closed"
-                 + (f" · {carry_wr:.0%} win" if carry_wr is not None else "")
+    best_bps = ops.get("carry_best_bps")
+    trigger_txt = (f"best funding {best_bps:+.1f}bps/{ops.get('carry_best_symbol','')[:8]} vs 10 entry"
+                   if best_bps is not None else "trigger distance: n/a")
+    carry_sub = (f"{trigger_txt} · {ops.get('carry_closed_n', 0)} closed"
                  + f" · review in {ops.get('carry_review_days', '?')}d")
 
     hr, ho = ops.get("health_runs", 0), ops.get("health_ok", 0)
     health_pct = (ho / hr * 100) if hr else 0
     health_cls = "ok" if health_pct >= 90 else ("warn" if health_pct >= 70 else "err")
+
+    # --- unlock sleeve panel ---
+    u_rows = []
+    for e in ops.get("unlock_events", []):
+        st = e.get("status", "?")
+        if st in ("open", "pending"):
+            extra = ""
+            if st == "open" and e.get("entry_px") and e.get("cur_px"):
+                mv = (float(e["cur_px"]) / float(e["entry_px"]) - 1) * 100
+                pnl = -mv  # short
+                c = "pnl-pos" if pnl >= 0 else "pnl-neg"
+                extra = (f"<td>entry {e['entry_px']}</td>"
+                         f"<td class='{c}'>{pnl:+.1f}% unrealized</td>")
+            elif st == "open":
+                extra = f"<td>entry {e.get('entry_px','?')}</td><td class='muted'>price n/a</td>"
+            else:
+                extra = "<td class='muted' colspan='2'>awaiting T-10 window</td>"
+            u_rows.append(f"<tr><td>{e['symbol']}</td><td>{e['unlock_date']}</td>"
+                          f"<td>{e['pct_supply']}%</td><td>{st}</td>{extra}</tr>")
+        elif st in ("completed", "stopped"):
+            c = "pnl-pos" if e.get("net_pct", 0) > 0 else "pnl-neg"
+            u_rows.append(f"<tr><td>{e['symbol']}</td><td>{e['unlock_date']}</td>"
+                          f"<td>{e['pct_supply']}%</td><td>{st}</td>"
+                          f"<td colspan='2' class='{c}'>net {e.get('net_pct',0):+.2f}%</td></tr>")
+    u_done = [e for e in ops.get("unlock_events", [])
+              if e.get("status") in ("completed", "stopped")]
+    u_wins = sum(1 for e in u_done if e.get("net_pct", 0) > 0)
+    unlock_card = f"""
+    <div class="card">
+      <h2>Unlock Shorts (paper trial: {len(u_done)}/10 done, {u_wins} wins)</h2>
+      <table>
+        <thead><tr><th>symbol</th><th>unlock</th><th>supply</th><th>status</th>
+          <th colspan="2">detail</th></tr></thead>
+        <tbody>{''.join(u_rows) or '<tr><td colspan=6 class=muted>no events registered</td></tr>'}</tbody>
+      </table>
+    </div>"""
+
+    # --- upcoming events calendar ---
+    cal_rows = "".join(
+        f"<tr><td>{d.strftime('%b %d')}</td><td>{'%+dd' % (d - pd.Timestamp.now(tz='UTC')).days}</td><td>{lbl}</td></tr>"
+        for d, lbl in upcoming_events(ops))
+    calendar_card = f"""
+    <div class="card">
+      <h2>Upcoming Events</h2>
+      <table>
+        <thead><tr><th>date</th><th>in</th><th>event</th></tr></thead>
+        <tbody>{cal_rows or '<tr><td colspan=3 class=muted>nothing scheduled</td></tr>'}</tbody>
+      </table>
+    </div>"""
 
     ops_strip = f"""
     <div class="row-4">
@@ -945,7 +1019,7 @@ h1 {{ font-size: 18px; margin: 0 0 4px 0; font-weight: 600; }}
             text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; }}
 .row-2 {{ display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }}
 .row-4 {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }}
-.kpi-strip {{ display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-bottom: 14px; }}
+.kpi-strip {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; margin-bottom: 14px; }}
 .kpi-cell {{ background: #15202b; border: 1px solid #253341; border-radius: 8px; padding: 12px; }}
 .kpi-l {{ font-size: 10px; color: #8899a6; text-transform: uppercase; letter-spacing: 0.05em; }}
 .kpi-v {{ font-size: 22px; font-weight: 600; margin-top: 4px; }}
@@ -983,6 +1057,7 @@ tr:hover td {{ background: #1a2330; }}
 <h1>Donchian (55/20) - Full Dashboard</h1>
 <div class="sub">Variant: <b>{variant_label}</b> &middot; Universe: <b>{len(SYMBOLS)}</b> symbols ({univ_label}) &middot; refresh: <code style="color:#1d9bf0">python dashboard.py</code></div>
 
+{banner}
 {perf_strip}
 
 <div class="grid">
@@ -1015,6 +1090,11 @@ tr:hover td {{ background: #1a2330; }}
       <tbody>{watch_body}</tbody>
     </table>
   </div>
+</div>
+
+<div class="row-2">
+  {unlock_card}
+  {calendar_card}
 </div>
 
 <div class="card">
@@ -1178,6 +1258,76 @@ def build_metrics_rows(closed_df: pd.DataFrame, ops: dict) -> list[dict]:
 
 
 # ============================================================================
+# Dashboard v5 helpers: banner / sparkline / unlock panel / calendar
+# ============================================================================
+
+def build_action_banner(state: dict) -> tuple[str, str, str]:
+    """Returns (css_class, headline, detail). The whole dashboard in one line."""
+    ops = state.get("ops", {})
+    if state.get("data_stale"):
+        return ("err", "⚠ ACTION NEEDED: market data is STALE",
+                f"latest BTC candle is {state['data_stale']}h old — every signal "
+                f"below may be wrong. Check VPN / run daily_check manually.")
+    if ops.get("exec_halted"):
+        return ("err", "⚠ ACTION NEEDED: executor HALTED",
+                f"{ops.get('exec_halt_reason','')[:120]} — investigate, then "
+                f"delete STOP_TRADING to resume.")
+    if ops.get("acct_issues"):
+        return ("err", "⚠ ACTION NEEDED: position mismatch",
+                "; ".join(ops["acct_issues"])[:160])
+    if ops.get("acct_age_h") is not None and ops["acct_age_h"] > 36:
+        return ("warn", "CHECK: account sync is stale",
+                f"last synced {ops['acct_age_h']:.0f}h ago — nightly run may be failing.")
+    return ("ok", "NO ACTION NEEDED", "all systems nominal — the machine has the watch")
+
+
+def equity_spark_svg(hist: list, width: int = 220, height: int = 40) -> str:
+    """Inline SVG sparkline of total equity. No JS, no libraries."""
+    if len(hist) < 2:
+        return f"<span class='muted'>sparkline after {2-len(hist)} more day(s)</span>"
+    vals = [v for _, v in hist][-60:]
+    lo, hi = min(vals), max(vals)
+    rng = (hi - lo) or 1.0
+    pts = []
+    for i, v in enumerate(vals):
+        x = i / (len(vals) - 1) * (width - 4) + 2
+        y = height - 4 - (v - lo) / rng * (height - 8)
+        pts.append(f"{x:.1f},{y:.1f}")
+    color = "#00ba7c" if vals[-1] >= vals[0] else "#f4212e"
+    return (f"<svg width='{width}' height='{height}'>"
+            f"<polyline fill='none' stroke='{color}' stroke-width='1.5' "
+            f"points='{' '.join(pts)}'/></svg>")
+
+
+def today_delta(hist: list) -> tuple:
+    """(delta_$, delta_pct, span_label) vs previous recorded day."""
+    if len(hist) < 2:
+        return (None, None, "")
+    prev, cur = hist[-2][1], hist[-1][1]
+    return (cur - prev, (cur / prev - 1) * 100 if prev else 0.0,
+            f"{hist[-2][0]} → {hist[-1][0]}")
+
+
+def upcoming_events(ops: dict) -> list[tuple]:
+    """Date-sorted (date, label) list of everything scheduled."""
+    now = pd.Timestamp.now(tz="UTC")
+    ev = [(pd.Timestamp("2026-09-01", tz="UTC"),
+           "Carry paper review — go/no-go for $200 live tranche")]
+    for e in ops.get("unlock_events", []):
+        u = pd.Timestamp(e["unlock_date"], tz="UTC")
+        if e.get("status") == "open":
+            ev.append((u, f"{e['symbol']} UNLOCK ({e['pct_supply']}% supply) — riding it"))
+            ev.append((u + pd.Timedelta(days=4),
+                       f"{e['symbol']} paper short closes (T+4) — result to Discord"))
+        elif e.get("status") == "pending":
+            ev.append((u - pd.Timedelta(days=10),
+                       f"{e['symbol']} paper short entry window opens (T-10)"))
+            ev.append((u, f"{e['symbol']} UNLOCK ({e['pct_supply']}% supply)"))
+    ev = [(d, l) for d, l in ev if d >= now - pd.Timedelta(days=1)]
+    return sorted(ev)[:8]
+
+
+# ============================================================================
 # Ops state (executor / account / carry / automation health)
 # ============================================================================
 
@@ -1246,6 +1396,23 @@ def collect_ops() -> dict:
             pass
     ops["carry_review_days"] = max(0, (pd.Timestamp("2026-09-01", tz="UTC")
                                        - pd.Timestamp.now(tz="UTC")).days)
+    ops["carry_best_bps"] = cst.get("best_trail_bps")
+    ops["carry_best_symbol"] = cst.get("best_trail_symbol", "")
+
+    # --- unlock events sleeve ---
+    try:
+        ops["unlock_events"] = json.loads(
+            Path("unlock_events.json").read_text(encoding="utf-8"))
+    except Exception:
+        ops["unlock_events"] = []
+
+    # --- equity history (today's P&L + sparkline) ---
+    ops["eq_hist"] = []
+    try:
+        eh = pd.read_csv("equity_history.csv")
+        ops["eq_hist"] = list(zip(eh["date"].astype(str), eh["total"].astype(float)))
+    except Exception:
+        pass
 
     # --- automation health (last 14 days of daily_check completions) ---
     ops["health_runs"] = 0
@@ -1404,6 +1571,29 @@ def main():
         "ops": collect_ops(),
     }
     state["metrics_rows"] = build_metrics_rows(closed_df, state["ops"])
+
+    # data staleness alarm: if the latest BTC candle is old, every signal is suspect
+    state["data_stale"] = None
+    try:
+        age_h = (pd.Timestamp.now(tz="UTC") - btc_df.index[-1]).total_seconds() / 3600
+        if age_h > 36:
+            state["data_stale"] = round(age_h)
+    except Exception:
+        pass
+
+    # enrich open unlock events with a current price (best effort)
+    try:
+        from net_utils import fetch_binance_futures
+        for e in state["ops"].get("unlock_events", []):
+            if e.get("status") == "open":
+                try:
+                    r = fetch_binance_futures("/fapi/v1/ticker/price",
+                                              {"symbol": e["symbol"]})
+                    e["cur_px"] = float(r.json()["price"])
+                except Exception:
+                    pass
+    except Exception:
+        pass
 
     html = render_html(state)
     out = Path("dashboard.html")
