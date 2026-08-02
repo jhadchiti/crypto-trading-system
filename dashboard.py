@@ -853,6 +853,32 @@ def render_html(state: dict) -> str:
     else:
         attribution_card = ""
 
+    # --- MC cone / capital planner / stress bodies ---
+    cone_svg = mc_cone_svg(state.get("closed_df"))
+
+    try:
+        import ledger
+        proj = ledger.project_milestones()
+        ms = proj["milestones"]
+        planner_body = (
+            f"<div class='kpi-s'>equity ${proj['equity']:,.2f} · deposit pace "
+            f"${proj['monthly_pace']:,.0f}/mo (trailing 90d) · assumed "
+            f"{proj['assumed_return']:.0%}/yr</div><table><tbody>"
+            + "".join(f"<tr><td>${t:,}</td><td>{ms.get(t, 'beyond 10y at current pace')}</td>"
+                      f"<td class='muted'>{'basis trade unlocks' if t==10_000 else 'vol selling unlocks' if t==25_000 else 'first milestone'}</td></tr>"
+                      for t in (1_000, 10_000, 25_000))
+            + "</tbody></table>"
+            + ("<div class='kpi-s v-block' style='margin-top:6px;'>deposit pace is $0/mo "
+               "— growth is return-only; log deposits: <code>python ledger.py deposit AMT</code></div>"
+               if proj["monthly_pace"] == 0 else ""))
+    except Exception:
+        planner_body = "<span class='muted'>ledger unavailable</span>"
+
+    s_rows = stress_rows(ops)
+    stress_body = ("".join(s_rows) if s_rows else
+                   '<tr><td colspan="5" class="muted">no open positions — '
+                   'panel activates with the first trade</td></tr>')
+
     # --- upcoming events calendar ---
     cal_rows = "".join(
         f"<tr><td>{d.strftime('%b %d')}</td><td>{'%+dd' % (d - pd.Timestamp.now(tz='UTC')).days}</td><td>{lbl}</td></tr>"
@@ -1045,7 +1071,8 @@ def render_html(state: dict) -> str:
 <title>Donchian Strategy Dashboard</title>
 <style>
 body {{ font-family: -apple-system, system-ui, sans-serif; margin: 0; padding: 20px;
-       background: #0f1419; color: #e7e9ea; }}
+       background: #0f1419; color: #e7e9ea;
+       -webkit-print-color-adjust: exact; print-color-adjust: exact; }}
 h1 {{ font-size: 18px; margin: 0 0 4px 0; font-weight: 600; }}
 .sub {{ color: #8899a6; font-size: 12px; margin-bottom: 16px; }}
 .grid {{ display: grid; gap: 14px; }}
@@ -1133,6 +1160,28 @@ tr:hover td {{ background: #1a2330; }}
 </div>
 
 {attribution_card}
+
+<div class="card">
+  <h2>Monte Carlo Cone — is live performance NORMAL? (green = live path;
+      shaded = range of luck with a REAL edge; 26% of good sequences end 20
+      trades negative — only breaking BELOW the cone is evidence)</h2>
+  {cone_svg}
+</div>
+
+<div class="row-2">
+  <div class="card">
+    <h2>Capital Planner (deposit pace -> milestone dates)</h2>
+    {planner_body}
+  </div>
+  <div class="card">
+    <h2>Stress: BTC -30% Overnight</h2>
+    <table>
+      <thead><tr><th>position</th><th>side</th><th>P&L @ -30%</th>
+        <th>liq dist</th><th>outcome</th></tr></thead>
+      <tbody>{stress_body}</tbody>
+    </table>
+  </div>
+</div>
 
 <div class="card">
   <h2>Open Positions (with lifecycle)</h2>
@@ -1362,6 +1411,78 @@ def upcoming_events(ops: dict) -> list[tuple]:
             ev.append((u, f"{e['symbol']} UNLOCK ({e['pct_supply']}% supply)"))
     ev = [(d, l) for d, l in ev if d >= now - pd.Timedelta(days=1)]
     return sorted(ev)[:8]
+
+
+def mc_cone_svg(closed_df, width=680, height=220) -> str:
+    """Monte Carlo cone (from mc_cone.json) with live cumulative-R overlaid.
+    Inside the shaded cone = noise, no decision warranted. Below p5 = evidence."""
+    try:
+        cone = json.loads(Path("mc_cone.json").read_text(encoding="utf-8"))
+    except Exception:
+        return "<span class='muted'>run <code>python mc_cone.py</code> to generate the cone</span>"
+    b = cone["bands"]
+    n = cone["n_trades"]
+    lo = min(min(b["5"]), -2)
+    hi = max(max(b["95"]), 2)
+
+    def xy(t, v):
+        x = 40 + t / n * (width - 60)
+        y = height - 25 - (v - lo) / (hi - lo) * (height - 45)
+        return f"{x:.1f},{y:.1f}"
+
+    def band_path(upper, lower):
+        pts = [xy(i + 1, v) for i, v in enumerate(upper)]
+        pts += [xy(i + 1, v) for i, v in reversed(list(enumerate(lower)))]
+        return " ".join(pts)
+
+    zero_y = xy(0, 0).split(",")[1]
+    svg = [f"<svg width='{width}' height='{height}'>"]
+    svg.append(f"<polygon points='{xy(0,0)} {band_path(b['95'], b['5'])}' "
+               f"fill='#1d9bf0' opacity='0.12'/>")
+    svg.append(f"<polygon points='{xy(0,0)} {band_path(b['75'], b['25'])}' "
+               f"fill='#1d9bf0' opacity='0.18'/>")
+    med = " ".join([xy(0, 0)] + [xy(i + 1, v) for i, v in enumerate(b["50"])])
+    svg.append(f"<polyline points='{med}' fill='none' stroke='#1d9bf0' "
+               f"stroke-width='1' stroke-dasharray='4,3'/>")
+    svg.append(f"<line x1='40' y1='{zero_y}' x2='{width-20}' y2='{zero_y}' "
+               f"stroke='#536471' stroke-width='0.5'/>")
+    # live path
+    if closed_df is not None and not closed_df.empty and "r_multiple" in closed_df.columns:
+        r = pd.to_numeric(closed_df.sort_values("exit_date")["r_multiple"],
+                          errors="coerce").dropna().cumsum()
+        if len(r):
+            live = " ".join([xy(0, 0)] + [xy(i + 1, v) for i, v in enumerate(r[:n])])
+            svg.append(f"<polyline points='{live}' fill='none' stroke='#00ba7c' "
+                       f"stroke-width='2'/>")
+    # axis labels
+    for v in (b["95"][-1], b["50"][-1], 0, b["5"][-1]):
+        x, y = xy(n, v).split(",")
+        svg.append(f"<text x='{float(x)+3}' y='{float(y)+3}' fill='#8899a6' "
+                   f"font-size='10'>{v:+.0f}R</text>")
+    svg.append("</svg>")
+    return "".join(svg)
+
+
+def stress_rows(ops: dict) -> list[str]:
+    """BTC -30% overnight scenario per open futures position."""
+    rows = []
+    for p in ops.get("acct", {}).get("futures", {}).get("positions", []):
+        mark = p.get("mark_price") or p.get("entry_price", 0)
+        amt = p.get("amount", 0)
+        if not mark or not amt:
+            continue
+        shocked = mark * 0.70          # beta~1 assumption: -30% underlying
+        pnl = (shocked - mark) * amt   # negative for longs, positive for shorts
+        liq = p.get("liq_price", 0)
+        breached = (liq > 0 and ((amt > 0 and shocked <= liq)
+                                 or (amt < 0 and shocked >= liq)))
+        c = "pnl-pos" if pnl >= 0 else "pnl-neg"
+        rows.append(f"<tr><td>{p['symbol']}</td><td>{p['side']}</td>"
+                    f"<td class='{c}'>{pnl:+.2f}$</td>"
+                    f"<td>{p.get('liq_dist_pct','—')}%</td>"
+                    f"<td class='{'pnl-neg' if breached else 'pnl-pos'}'>"
+                    f"{'LIQUIDATED' if breached else 'survives'}</td></tr>")
+    return rows
 
 
 # ============================================================================
@@ -1608,6 +1729,7 @@ def main():
         "ops": collect_ops(),
     }
     state["metrics_rows"] = build_metrics_rows(closed_df, state["ops"])
+    state["closed_df"] = closed_df
 
     # data staleness alarm: if the latest BTC candle is old, every signal is suspect
     state["data_stale"] = None

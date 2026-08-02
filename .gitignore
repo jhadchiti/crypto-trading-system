@@ -6,6 +6,8 @@ sleeve_ledger.json
 unlock_events.json
 paper_carry_log.csv
 account_state.json
+trade_reviews.csv
+decision_journal.jsonl
 equity_history.csv
 live_trades.csv
 live_trades_test_backup.csv

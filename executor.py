@@ -315,6 +315,27 @@ def append_entry(symbol: str, side: int, price: float, qty: float,
     df.to_csv(TRADES_FILE, index=False)
 
 
+def write_trade_review(symbol: str, side: int, entry_px: float,
+                       exit_px: float, reason: str, r_realized,
+                       signal_px: float | None, bars_held) -> None:
+    """Post-trade review card: execution quality per closed trade.
+    Feeds the 20-trade calibration with per-trade slippage detail."""
+    slip_bps = ""
+    if signal_px and signal_px > 0:
+        # exit slippage vs the signal close that triggered the exit
+        slip_bps = round((exit_px - signal_px) / signal_px * 1e4 * (1 if side < 0 else -1), 1)
+    row = {
+        "closed": datetime.now(timezone.utc).isoformat(),
+        "symbol": symbol, "side": "LONG" if side > 0 else "SHORT",
+        "entry_px": entry_px, "exit_px": exit_px, "exit_reason": reason,
+        "r_realized": r_realized, "exit_slip_bps": slip_bps,
+        "bars_held": bars_held,
+    }
+    f = Path("trade_reviews.csv")
+    df = pd.DataFrame([row])
+    df.to_csv(f, mode="a", header=not f.exists(), index=False)
+
+
 def close_trade_row(symbol: str, exit_price: float, reason: str,
                     risk_dollars: float) -> None:
     df = load_trades()
@@ -336,12 +357,20 @@ def close_trade_row(symbol: str, exit_price: float, reason: str,
     df.at[i, "pnl_net"] = round(net, 4)
     df.at[i, "r_multiple"] = round(net / risk_dollars, 3) if risk_dollars > 0 else ""
     df.at[i, "exit_reason"] = reason
+    bars = ""
     try:
         ed = pd.Timestamp(df.at[i, "entry_date"])
-        df.at[i, "bars_held"] = (pd.Timestamp.now(tz="UTC") - ed).days
+        bars = (pd.Timestamp.now(tz="UTC") - ed).days
+        df.at[i, "bars_held"] = bars
     except Exception:
         pass
     df.to_csv(TRADES_FILE, index=False)
+    try:
+        write_trade_review(symbol, 1 if size > 0 else -1, entry_price,
+                           exit_price, reason,
+                           df.at[i, "r_multiple"], None, bars)
+    except Exception as e:
+        print(f"  WARN trade review: {e}", file=sys.stderr)
 
 
 # ============================================================================

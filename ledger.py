@@ -111,6 +111,29 @@ def attribution() -> dict:
     }
 
 
+def project_milestones(annual_return: float = 0.15) -> dict:
+    """Project equity forward at the recent deposit pace + assumed return.
+    Returns milestone dates for $1k / $10k / $25k. Conservative by design."""
+    a = attribution()
+    equity = a["equity"] or INCEPTION_EQUITY
+    d = load()
+    # deposit pace: trailing 90d of flows, monthly rate
+    now = pd.Timestamp.now(tz="UTC")
+    recent = [f["amount"] for f in d["flows"]
+              if pd.Timestamp(f["date"], tz="UTC") > now - pd.Timedelta(days=90)]
+    monthly = sum(recent) / 3.0
+    r_m = (1 + annual_return) ** (1 / 12) - 1
+    eq = equity
+    milestones = {}
+    for m in range(1, 121):
+        eq = eq * (1 + r_m) + monthly
+        for target in (1_000, 10_000, 25_000):
+            if target not in milestones and eq >= target:
+                milestones[target] = (now + pd.DateOffset(months=m)).strftime("%Y-%m")
+    return {"equity": equity, "monthly_pace": monthly,
+            "assumed_return": annual_return, "milestones": milestones}
+
+
 def show() -> None:
     a = attribution()
     print(f"inception {INCEPTION_DATE}: ${a['inception']:.2f}")

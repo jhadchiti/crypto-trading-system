@@ -110,6 +110,35 @@ def build_digest() -> str:
     return "\n".join(lines)
 
 
+EDGE_PATHS = [
+    r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+    r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+]
+
+
+def make_pdf() -> Path | None:
+    """Render dashboard.html -> dashboard.pdf via headless Edge (ships with
+    Windows — no installs). Returns the pdf path or None on any failure."""
+    dash = Path("dashboard.html").resolve()
+    if not dash.exists():
+        return None
+    edge = next((p for p in EDGE_PATHS if Path(p).exists()), None)
+    if edge is None:
+        return None
+    out = Path("dashboard.pdf").resolve()
+    import subprocess
+    try:
+        subprocess.run(
+            [edge, "--headless", "--disable-gpu", "--no-pdf-header-footer",
+             f"--print-to-pdf={out}", dash.as_uri()],
+            capture_output=True, timeout=90)
+        if out.exists() and out.stat().st_size > 1000:
+            return out
+    except Exception as e:
+        print(f"  pdf render failed: {e}", file=sys.stderr)
+    return None
+
+
 def send(msg: str) -> bool:
     webhook = os.environ.get("DISCORD_WEBHOOK_URL")
     if not webhook:
@@ -117,9 +146,13 @@ def send(msg: str) -> bool:
         return False
     payload = {"content": f"**[Daily Digest]**\n{msg}"}
     files = {}
-    dash = Path("dashboard.html")
-    if dash.exists():
-        files = {"file": ("dashboard.html", dash.read_bytes(), "text/html")}
+    pdf = make_pdf()
+    if pdf is not None:
+        files = {"file": ("dashboard.pdf", pdf.read_bytes(), "application/pdf")}
+    elif Path("dashboard.html").exists():
+        # fallback if Edge is unavailable
+        files = {"file": ("dashboard.html",
+                          Path("dashboard.html").read_bytes(), "text/html")}
     try:
         r = requests.post(webhook,
                           data={"payload_json": json.dumps(payload)},
