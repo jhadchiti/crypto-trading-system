@@ -1817,12 +1817,17 @@ def main():
         print(f"  WARN analytics: {e}")
     state["closed_df"] = closed_df
 
-    # data staleness alarm: if the latest BTC candle is old, every signal is suspect
+    # data staleness alarm: if the latest COMPLETED BTC candle is old, every
+    # signal is suspect. Bars are indexed by OPEN time and the forming bar is
+    # dropped (partial-bar fix), so age must be measured from bar CLOSE
+    # (open + 1 day) — measuring from open false-alarmed daily after 12:00 UTC
+    # (post-mortem 2026-08-09, CRITICAL_REGISTER).
     state["data_stale"] = None
     try:
-        age_h = (pd.Timestamp.now(tz="UTC") - btc_df.index[-1]).total_seconds() / 3600
-        if age_h > 36:
-            state["data_stale"] = round(age_h)
+        last_close_ts = btc_df.index[-1] + pd.Timedelta(days=1)
+        age_h = (pd.Timestamp.now(tz="UTC") - last_close_ts).total_seconds() / 3600
+        if age_h > 30:   # completed close should never be >30h old
+            state["data_stale"] = round(age_h + 24)  # report age of the data itself
     except Exception:
         pass
 

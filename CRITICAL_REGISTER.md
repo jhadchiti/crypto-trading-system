@@ -46,6 +46,21 @@ proved that unasked skeptical questions are where systems rot.*
 | **Do signals evaluate a partial bar?** | YES — fetch_recent included the still-forming daily candle; on delayed runs its "close" was hours of unfinished price action the backtest never saw | fetch_recent now drops any bar that hasn't completed; signals evaluate completed closes only, matching backtest semantics exactly |
 | **Naked position if stop placement fails after entry fills?** | YES — a stop-order rejection left the position live, unprotected, and untracked until next sync | 3x stop retry; if all fail, position is closed immediately (flat is safe); if even the close fails, hard HALT + manual-action alert |
 
+## POST-MORTEM 2026-08-09: false STALE-DATA banner (protocol rule 3 applied)
+
+**Surprise:** operator saw "market data is STALE — 45h old" banner; assistant's
+"check now" review missed it entirely.
+**Root cause:** interaction of two individually-correct fixes — the partial-bar
+drop (2026-08-02) made the last bar always yesterday's, while the staleness
+alarm measured age from bar OPEN time. Result: false alarm every day after
+12:00 UTC. Data and signals were correct throughout.
+**Fixes:** (1) staleness now measured from bar CLOSE; (2) review protocol
+amended — any "check the system" pass must recompute the ACTION BANNER state,
+not just read state files. A status report that skips the operator's first
+pixel is not a status report.
+**Lesson:** every fix must be re-audited against the alarms that observe the
+thing it changed. Interactions, not components, are where audited systems break.
+
 ## MONITORING (known, unresolved, watched)
 
 | Question | Why it matters | Watch via |
