@@ -145,6 +145,9 @@ def main():
     # Daily digest to Discord (dashboard summary + html attachment). Advisory.
     run_step("digest", "dashboard_digest.py")
 
+    # Nightly state backup — the track record must survive the laptop. Advisory.
+    run_step("backup", "backup_state.py")
+
     log(f"daily_check complete (alerter={'OK' if alerter_ok else 'FAIL'}, "
         f"executor={'OK' if executor_ok else 'FAIL'}, "
         f"dashboard={'OK' if dashboard_ok else 'FAIL'}, "

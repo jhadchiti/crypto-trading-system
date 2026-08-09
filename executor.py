@@ -444,12 +444,19 @@ def set_margin_and_leverage(symbol: str, leverage: int, margin_type: str) -> Non
 # Main logic
 # ============================================================================
 
-def run(selftest: bool = False) -> None:
+def run(selftest: bool = False, rehearse: bool = False) -> None:
     cfg = load_config()
+    if rehearse:
+        # FLIP FIRE-DRILL: force macro ON, force dry-run, walk the ENTIRE
+        # chain (signals -> gates -> sizing -> would-be orders) so the first
+        # real macro-ON night is the second time this path executes.
+        cfg = dict(cfg)
+        cfg["live"] = False
     state = load_state()
     now = datetime.now(timezone.utc)
     today_iso = now.strftime("%Y-%m-%d")
-    mode = "LIVE" if cfg.get("live") else "DRY-RUN"
+    mode = ("REHEARSAL (macro forced ON, no orders possible)" if rehearse
+            else "LIVE" if cfg.get("live") else "DRY-RUN")
 
     print(f"[{now.isoformat()}] executor starting ({mode})")
 
@@ -519,6 +526,9 @@ def run(selftest: bool = False) -> None:
 
     btc_regime = wf3.compute_btc_regime(symbol_data["BTCUSDT"])
     macro_on = bool(btc_regime.iloc[-1])
+    if rehearse:
+        macro_on = True
+        print("  REHEARSAL: macro regime FORCED ON for this run only")
 
     fng_value = float("nan")
     btc_rel_by_symbol = {}
@@ -716,10 +726,14 @@ def run(selftest: bool = False) -> None:
     # ------------------------------------------------------------------
     # Persist + report
     # ------------------------------------------------------------------
-    state["executed_signals"] = sorted(executed)[-200:]
-    state["last_margin_balance"] = margin_bal
-    state["last_run"] = now.isoformat()
-    save_state(state)
+    if rehearse:
+        print(f"\n  REHEARSAL COMPLETE — {len(actions)} would-be action(s) above; "
+              f"no state saved, no orders placed, dedup untouched.")
+    else:
+        state["executed_signals"] = sorted(executed)[-200:]
+        state["last_margin_balance"] = margin_bal
+        state["last_run"] = now.isoformat()
+        save_state(state)
 
     if actions:
         # Split real trade events from routine skips: trades get the loud
@@ -751,5 +765,7 @@ def run(selftest: bool = False) -> None:
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--selftest", action="store_true")
+    ap.add_argument("--rehearse", action="store_true",
+                    help="fire drill: force macro ON in dry-run; no orders")
     args = ap.parse_args()
-    run(selftest=args.selftest)
+    run(selftest=args.selftest, rehearse=args.rehearse)

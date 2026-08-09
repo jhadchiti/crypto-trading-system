@@ -35,3 +35,8 @@ dashboard.html
 __pycache__/
 *.pyc
 .venv/
+
+# === Backups (local only) ===
+state_backups/
+backup_config.json
+dashboard.pdf

@@ -107,6 +107,24 @@ def build_digest() -> str:
     if sigs:
         lines.append("blocked/active: " + ", ".join(f"{k.replace('USDT','')}:{v}"
                                                     for k, v in list(sigs.items())[:5]))
+
+    # --- dead-man nag: the unlock sleeve starves silently without monthly
+    #     calendar research; nag when the pipeline is empty of pending events
+    try:
+        pending = [e for e in (uev or []) if e.get("status") == "pending"]
+        newest_reg = max((pd.Timestamp(e.get("registered", "2000-01-01"))
+                          for e in (uev or [])), default=None)
+        days_since = ((pd.Timestamp.now(tz="UTC") - newest_reg.tz_convert("UTC")
+                       if newest_reg is not None and newest_reg.tzinfo
+                       else pd.Timestamp.now(tz="UTC") - (newest_reg.tz_localize("UTC")
+                       if newest_reg is not None else pd.Timestamp.now(tz="UTC")))
+                      ).days if newest_reg is not None else 999
+        if not pending and days_since > 30:
+            lines.append("⚠ UNLOCK RESEARCH OVERDUE: no pending events and none "
+                         "registered in 30d+ — the sleeve is starving. "
+                         "~1hr: check tokenomist/cryptorank, add qualifying events.")
+    except Exception:
+        pass
     return "\n".join(lines)
 
 
