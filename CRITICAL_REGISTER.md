@@ -61,6 +61,31 @@ pixel is not a status report.
 **Lesson:** every fix must be re-audited against the alarms that observe the
 thing it changed. Interactions, not components, are where audited systems break.
 
+## FIRE DRILL LOG
+
+| Date | Drill | Result |
+|---|---|---|
+| 2026-08-09 | First `--rehearse` (macro forced ON, dry) | Chain verified end-to-end: 7 breakouts → RS gate passed 2 → sanity gate refused both. **CAUGHT: scheduled task ran at 00:05 LOCAL (21:05 UTC) — 21h-stale signals vs live marks; would have vetoed/mispriced flip-night entries. Fixed same day: trigger moved to 03:05 local ≈ 00:05 UTC.** One rehearsal, one premiere-night defect found with zero dollars on stage. Re-drill after any executor change and quarterly. |
+
+## POST-MORTEM 2026-08-18: six dark days — the canary died first
+
+**Timeline:** Aug 11 — digest began crashing on an emoji (cp1252 console under
+Task Scheduler; crash occurred BEFORE the Discord send). Aug 13 — VPN stopped
+connecting (likely NordVPN update reset auto-connect). Aug 13-17 — nightly
+runs fired, network gate correctly aborted each one. Operator noticed Aug 18.
+**What worked:** every abort was safe and logged; no stale data, no bad
+trades; real money untouched (macro OFF, no positions; paper sleeves froze).
+**What failed:** the dead-man's switch. Its heartbeat channel (digest) was
+KILLED BY A COSMETIC BUG two days before the real outage, so "absence of
+digest" carried no signal. A monitoring channel must be strictly more robust
+than the things it monitors.
+**Fixes:** (1) digest forces UTF-8 with replacement — console rendering can
+never kill delivery again; (2) delivery reordered BEFORE printing; (3) rule
+reaffirmed with teeth: ANY morning without a digest = check the laptop that
+day, not "two mornings" — the six-day gap proves grace periods compound.
+**Operator action from this event:** re-enable NordVPN auto-connect (app
+updates reset it); verify after every NordVPN update.
+
 ## MONITORING (known, unresolved, watched)
 
 | Question | Why it matters | Watch via |

@@ -21,6 +21,15 @@ import json
 import sys
 from pathlib import Path
 
+# Windows Task Scheduler consoles use cp1252 — emoji in print() crashed the
+# whole digest (post-mortem 2026-08-18: the heartbeat died on a checkmark).
+# Force UTF-8 with replacement so console cosmetics can NEVER kill delivery.
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
 import pandas as pd
 import requests
 
@@ -188,7 +197,18 @@ def send(msg: str) -> bool:
 
 if __name__ == "__main__":
     digest = build_digest()
-    print(digest)
+    # DELIVERY FIRST, cosmetics second: the Discord send is the heartbeat and
+    # must never depend on the console being able to render the text.
     if "--dry-run" not in sys.argv:
-        if send(digest):
-            print("\nsent to Discord (with dashboard.html attached)")
+        ok = send(digest)
+        try:
+            print(digest)
+            print("\nsent to Discord" if ok else "\nDISCORD SEND FAILED")
+        except Exception:
+            pass
+        sys.exit(0 if ok else 1)
+    else:
+        try:
+            print(digest)
+        except Exception:
+            print(digest.encode("ascii", "replace").decode())

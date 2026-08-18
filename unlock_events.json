@@ -3,16 +3,19 @@
     "symbol": "PROVEUSDT",
     "unlock_date": "2026-08-05",
     "pct_supply": 160.0,
-    "status": "open",
+    "status": "completed",
     "registered": "2026-08-02T20:58:43.727125+00:00",
     "entry_px": 0.1665,
-    "entry_time": "2026-08-02T20:58:49.218873+00:00"
+    "entry_time": "2026-08-02T20:58:49.218873+00:00",
+    "exit_px": 0.1584,
+    "exit_time": "2026-08-10T07:01:08.987510+00:00",
+    "net_pct": 4.68
   },
   {
     "symbol": "KAITOUSDT",
     "unlock_date": "2026-08-20",
     "pct_supply": 13.5,
-    "status": "pending",
+    "status": "skipped_crowded",
     "registered": "2026-08-02T20:58:47.012281+00:00"
   }
 ]
