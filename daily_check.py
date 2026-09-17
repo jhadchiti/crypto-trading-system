@@ -114,6 +114,22 @@ def main():
     log(f"  python:  {PYTHON}")
     log(f"  cwd:     {HERE}")
 
+    # KEEP-AWAKE (post-mortem 2026-09-18): the wake timer wakes the PC, but
+    # Windows re-sleeps ~2 min later, freezing the run mid-flight (see the
+    # headless 'daily_check starting' stub of 2026-09-16). Hold the system
+    # awake for the duration of this run; release on exit.
+    try:
+        import ctypes
+        ES_CONTINUOUS, ES_SYSTEM_REQUIRED = 0x80000000, 0x00000001
+        ctypes.windll.kernel32.SetThreadExecutionState(
+            ES_CONTINUOUS | ES_SYSTEM_REQUIRED)
+        import atexit
+        atexit.register(lambda: ctypes.windll.kernel32.SetThreadExecutionState(
+            ES_CONTINUOUS))
+        log("  keep-awake: engaged for run duration")
+    except Exception as e:
+        log(f"  keep-awake unavailable: {e}")
+
     if not wait_for_network():
         log("daily_check aborted (no network) — will retry at next schedule")
         sys.exit(1)
