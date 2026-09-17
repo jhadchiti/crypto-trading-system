@@ -27,6 +27,16 @@ Run:
 
 from __future__ import annotations
 
+# UTF-8 console guard (post-mortems 2026-08-18 and 2026-09-13: cp1252 under
+# Task Scheduler crashed digest, then alerter+executor ON FLIP MORNING.
+# Console rendering must NEVER kill logic or delivery.)
+import sys as _sys
+try:
+    _sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    _sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
 import json
 import math
 import re

@@ -20,6 +20,16 @@ Run manually (e.g., to verify before scheduling):
 
 from __future__ import annotations
 
+# UTF-8 console guard (post-mortems 2026-08-18 and 2026-09-13: cp1252 under
+# Task Scheduler crashed digest, then alerter+executor ON FLIP MORNING.
+# Console rendering must NEVER kill logic or delivery.)
+import sys as _sys
+try:
+    _sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    _sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
 import subprocess
 import sys
 import traceback
@@ -107,6 +117,15 @@ def main():
     if not wait_for_network():
         log("daily_check aborted (no network) — will retry at next schedule")
         sys.exit(1)
+
+    # Weekly universe refresh — SERIALIZED as step 0 (post-mortem 2026-09-15:
+    # the separate Sunday task fired BETWEEN alerter and executor on flip day,
+    # swapping the universe mid-pipeline; 5 validated entry signals fell into
+    # the gap and were never executed. The refresh must never run in parallel
+    # with the pipeline. Disable the separate scheduled task.
+    from datetime import datetime as _dt
+    if _dt.now(timezone.utc).weekday() == 6:   # Sunday
+        run_step("universe_refresh", "dynamic_universe.py")
 
     # Run alerter — fires Discord/email/log if there's something actionable
     alerter_ok = run_step("alerter", "signal_alerter.py")

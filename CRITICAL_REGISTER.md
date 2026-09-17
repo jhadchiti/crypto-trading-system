@@ -86,6 +86,24 @@ day, not "two mornings" — the six-day gap proves grace periods compound.
 **Operator action from this event:** re-enable NordVPN auto-connect (app
 updates reset it); verify after every NordVPN update.
 
+## POST-MORTEM 2026-09-13: the SAME bug class struck on FLIP MORNING
+
+**Event:** BTC macro flipped ON (~Sept 11-13, slope +1.52%) — the moment the
+system waited 290+ days for. That morning's alerter crashed printing the flip
+message itself (the arrow in "OFF→ON" is unprintable in cp1252); the executor
+crashed printing its routine report. The flip alert never reached Discord.
+**Money impact: none.** The executor completed all trade logic BEFORE the
+report crash: FLOCKUSDT's LONG_ENTRY was evaluated and skipped by a rail
+(reason lost with the crashed report; re-evaluated on the recovery run).
+Signal was never marked executed, so no opportunity was consumed.
+**Root cause of recurrence — process, not code:** the 2026-08-18 post-mortem
+identified this exact class and said "fix the class"; the fix was applied to
+ONE script (digest) instead of the fleet. A post-mortem whose fix isn't
+applied class-wide is a diary entry, not a fix.
+**Fix:** UTF-8 console guard installed in ALL nine pipeline scripts
+(2026-09-13). New rule: any bug found in one component triggers an immediate
+grep-sweep for the same pattern in every component, same day.
+
 ## MONITORING (known, unresolved, watched)
 
 | Question | Why it matters | Watch via |
