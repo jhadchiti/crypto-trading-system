@@ -104,6 +104,50 @@ applied class-wide is a diary entry, not a fix.
 (2026-09-13). New rule: any bug found in one component triggers an immediate
 grep-sweep for the same pattern in every component, same day.
 
+## POST-MORTEM 2026-09-18: first-ever live order — rejected -2015 (read-only key)
+
+**Event:** the first properly-timed run in system history (00:05 UTC,
+keep-awake engaged, ZEC signal 2 min after bar close, every rail passed) sent
+the first real order ever — and Binance rejected it:
+`-2015 Invalid API-key, IP, or permissions` on /fapi/v1/order AND
+/fapi/v1/leverage. **Money impact: none** — rejection happened before any
+position or margin change ($50.45 untouched, no naked exposure).
+**Root cause:** the key in secrets.env can READ but not TRADE — most likely
+the September secrets recovery restored the *read-only* key's values, or
+"Enable Futures" was never checked / auto-expired. Every check we had
+(selftest, account_sync, weeks of green runs) only exercised READ endpoints,
+so a read-only key looked healthy for weeks. The order path had never been
+live-verified: `--selftest` reads, `--rehearse` is dry.
+**Fix (class-wide, not diary):** selftest now probes the TRADING permission
+directly (harmless POST /fapi/v1/leverage BTCUSDT) and prints
+`TRADING PERMISSION OK` or a loud failure. Rule: a permission is only
+"configured" when a call *requiring* it has succeeded — green reads prove
+nothing about writes.
+**Secondary observation:** 龙虾USDT skipped at 1.3% deviation vs the 1.0%
+sanity gate — the gate worked as designed on a coin moving 20%+/day. A fixed-%
+gate is stricter in R-terms for high-vol symbols (1.3% ≈ 0.06R vs its 23%
+stop); any change goes through the gauntlet, not through frustration.
+
+## DECISION 2026-09-19: exchange-floor sizing override (operator-accepted risk)
+
+**Context:** first fully-working run (key fixed, -2015 gone) produced 4 valid
+signals and ZERO trades — all fell below Binance's $5 minimum notional at
+0.75% risk on $112 equity (ZEC $4.68 post-rounding, USELESS $3.22, UNI
+rounds to 0 coins). The ladder's rung 1 is unimplementable at this equity.
+**Decision (Joseph):** "make it minimum $5 — I want these to trade."
+**Implementation:** executor bumps quantity up to the exchange floor ONLY
+when the implied risk stays ≤ `min_notional_risk_cap` = **1.25% of equity**;
+above the cap the trade skips with a receipt. Actual risk (not the 0.75%
+target) is now stored per trade in live_trades.csv and used for R-multiples,
+so capture metrics stay honest. Tonight's four would have risked 0.77% /
+1.11% / 1.17% — ~4.5% combined heat, under the 5% daily breaker.
+**Sunset clause:** the override self-deactivates as equity grows (0.75%
+clears $5 naturally from roughly $200+ equity on typical stops). The ladder's
+20-trade / ≥60%-capture gate for rung 2 counts these trades at their ACTUAL
+risk. This is a size-floor accommodation, not a sizing increase by appetite.
+**Trader's honest note:** at 1.17% risk per trade, a normal 8-loss streak
+(p≈26% of 20-trade runs start negative) costs ~9% instead of ~6%. Accepted.
+
 ## MONITORING (known, unresolved, watched)
 
 | Question | Why it matters | Watch via |

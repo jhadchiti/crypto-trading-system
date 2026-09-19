@@ -649,6 +649,85 @@ def verdict_class(v):
     return "v-none"
 
 
+# ============================================================================
+# Storyline helpers (2026-09-18 revalidation): the dashboard must answer, in
+# order: ACT -> what the machine DID -> NOW -> NEXT -> PROOF -> REFERENCE.
+# ============================================================================
+
+_HERE = Path(__file__).resolve().parent
+
+
+def parse_exec_ledger(max_tail_lines: int = 1200) -> dict:
+    """Extract what the executor actually DID in its most recent run from
+    automation.log. Returns {"ts": str|None, "lines": [(cls, text), ...]}.
+    This is the accountability panel: signals say what SHOULD happen; this
+    says what DID (fills, rejections, skips, warnings)."""
+    out = {"ts": None, "lines": []}
+    logf = _HERE / "automation.log"
+    if not logf.exists():
+        return out
+    try:
+        tail = logf.read_text(encoding="utf-8", errors="replace").splitlines()[-max_tail_lines:]
+    except Exception:
+        return out
+    start_i = None
+    for i in range(len(tail) - 1, -1, -1):
+        if "START executor" in tail[i]:
+            start_i = i
+            break
+    if start_i is None:
+        return out
+    import re as _re
+    m = _re.search(r"\[([0-9\- :]+ UTC)\]", tail[start_i])
+    out["ts"] = m.group(1) if m else None
+    interesting = ("ENTRY", "SKIP", "EXECUTED", "EXIT", "STOP FILLED",
+                   "WARN", "HALT", "REVERSED", "below exchange minimum",
+                   "risk_per_trade")
+    for line in tail[start_i + 1:]:
+        if ("OK executor" in line) or ("FAIL executor" in line):
+            break
+        if "executor: " not in line and "executor STDERR" not in line:
+            continue
+        txt = line.split("executor: ", 1)[-1].strip() if "executor: " in line \
+            else line.split("executor STDERR:", 1)[-1].strip()
+        if not any(k in txt for k in interesting):
+            continue
+        # repair legacy mojibake (log lines written before daily_check decoded
+        # child output as UTF-8: 龙虾 arrived as é¾™è™¾)
+        try:
+            fixed = txt.encode("cp1252").decode("utf-8")
+            if fixed != txt:
+                txt = fixed
+        except (UnicodeEncodeError, UnicodeDecodeError):
+            pass
+        if ("FAILED" in txt) or ("HALT" in txt) or ("REVERSED" in txt) or ("STDERR" in line):
+            cls = "pnl-neg"
+        elif ("SKIP" in txt) or ("WARN" in txt) or ("minimum" in txt):
+            cls = "v-block"
+        else:
+            cls = "pnl-pos"
+        out["lines"].append((cls, txt))
+    return out
+
+
+def count_live_trades() -> int:
+    try:
+        df = load_live_trades()
+        return 0 if df is None or df.empty else len(df)
+    except Exception:
+        return 0
+
+
+def exec_last_run_age_h() -> float | None:
+    try:
+        import json as _json
+        st = _json.loads((_HERE / "executor_state.json").read_text(encoding="utf-8"))
+        ts = pd.Timestamp(st.get("last_run"))
+        return float((pd.Timestamp.now(tz="UTC") - ts).total_seconds() / 3600)
+    except Exception:
+        return None
+
+
 def render_html(state: dict) -> str:
     K = state["kpis"]; R = state["regime_states"]; mo = state["market"]
     rs = state["risk"]; cal = state["cal"]; dep = state["deployment"]
@@ -659,6 +738,76 @@ def render_html(state: dict) -> str:
     banner = (f'<div class="reg-card {b_cls}" style="margin-bottom:14px;">'
               f'<div class="reg-v">{b_head}</div>'
               f'<div class="reg-s">{b_detail}</div></div>')
+
+    # === Section 0b: Execution Ledger + headline + path-to-first-trade ===
+    ledger_info = parse_exec_ledger()
+    n_trades_ever = count_live_trades()
+    entry_sigs = [s for s in state["signals"] if s.verdict in ("LONG_ENTRY", "SHORT_ENTRY")]
+
+    if ledger_info["lines"]:
+        led_rows = "".join(
+            f'<li class="{cls}" style="font-family:ui-monospace,monospace;'
+            f'font-size:12px;">{txt}</li>' for cls, txt in ledger_info["lines"])
+    else:
+        led_rows = '<li class="muted">no entry/exit actions in the last executor run</li>'
+    ledger_card = f"""
+    <div class="card">
+      <h2>Execution Ledger — what the executor DID last run ({ledger_info['ts'] or 'n/a'})</h2>
+      <ul class="changed">{led_rows}</ul>
+    </div>
+    """
+
+    # headline: the whole story in one line
+    exec_bits = []
+    for cls, txt in ledger_info["lines"]:
+        if "ENTRY FAILED" in txt:
+            exec_bits.append(f"ORDER REJECTED ({txt.split(':')[0].replace('ENTRY FAILED', '').strip()})")
+        elif txt.startswith("EXECUTED"):
+            exec_bits.append(txt.split(":")[0])
+        elif txt.startswith("SKIP"):
+            exec_bits.append(f"skipped {txt.split(':')[0].replace('SKIP', '').strip()}")
+    exec_txt = ", ".join(exec_bits[:3]) if exec_bits else "no executor action"
+    _du, _dp, _ = today_delta(ops.get("eq_hist", []))
+    d_txt = f" · today {_dp:+.2f}%" if _du is not None else ""
+    headline = (f'<div class="sub" style="font-size:13px;color:#e7e9ea;margin:2px 0 12px 0;">'
+                f'Macro <b>{"ON" if state["macro_on"] else "OFF"}</b> day {state["days_in_regime"]}'
+                f' · <b>{len(entry_sigs)}</b> entry signal{"s" if len(entry_sigs) != 1 else ""}'
+                f'{" (" + ", ".join(s.symbol for s in entry_sigs[:4]) + ")" if entry_sigs else ""}'
+                f' · {exec_txt} · {state["n_open"]} open · equity {fmt_money(K["equity"])}{d_txt}</div>')
+
+    # path-to-first-trade: shown only while the system has never traded
+    first_trade_card = ""
+    if n_trades_ever == 0:
+        age_h = exec_last_run_age_h()
+        timing_ok = age_h is not None and age_h < 30
+        rejected = any("ENTRY FAILED" in t for _, t in ledger_info["lines"])
+        executed = any(t.startswith("EXECUTED") for _, t in ledger_info["lines"])
+        def _step(ok, label, sub):
+            ic = {"ok": "✓", "err": "✗", "warn": "…"}[ok]
+            c = {"ok": "pnl-pos", "err": "pnl-neg", "warn": "v-block"}[ok]
+            return (f'<li><span class="{c}" style="font-weight:600;">{ic} {label}</span>'
+                    f' <span class="muted">— {sub}</span></li>')
+        order_state = ("ok" if executed else ("err" if rejected else "warn"))
+        order_sub = ("first order accepted" if executed else
+                     ("REJECTED -2015: key can read, not trade — Binance API Management → Enable Futures, then python executor.py --selftest"
+                      if rejected else "unverified until first live order (selftest now probes trading permission)"))
+        timing_sub = (f"last executor run {age_h:.0f}h ago, keep-awake engaged"
+                      if age_h is not None else "no executor state")
+        sig_sub = (f"macro ON, {len(entry_sigs)} valid entry signal(s) today"
+                   if state["macro_on"] else "macro OFF — no entries by design")
+        steps = "".join([
+            _step("ok" if timing_ok else "err", "Timing &amp; wake", timing_sub),
+            _step("ok" if state["macro_on"] else "warn", "Signal generation", sig_sub),
+            _step("ok" if entry_sigs else "warn", "Sizing vs exchange minimums",
+                  "see 'tradeable' column in Today's Signals"),
+            _step(order_state, "Order path (API trading permission)", order_sub),
+        ])
+        first_trade_card = f"""
+    <div class="card" style="border-left:4px solid #1d9bf0;">
+      <h2>Path to First Trade (system has never traded — this is the current mission)</h2>
+      <ul class="changed">{steps}</ul>
+    </div>
+    """
 
     eq_hist = ops.get("eq_hist", [])
     d_usd, d_pct, d_span = today_delta(eq_hist)
@@ -760,6 +909,10 @@ def render_html(state: dict) -> str:
         <div class="mini-cell"><div class="mini-l">Risk multiplier</div><div class="mini-v">x{R['multiplier']:.2f}</div></div>
       </div>
       <div class="kpi-s" style="margin-top:8px;">{' &middot; '.join(R['reasons'])}</div>
+      <div class="kpi-s" style="margin-top:6px;color:#1d9bf0;">
+        Sizing ladder: <b>RUNG 1 — 0.75%/trade</b> &middot; advance to 1.0% after 20
+        closed trades at &ge;60% capture ({count_live_trades()}/20) &middot; ceiling 2% (code-clamped)
+      </div>
     </div>
     """
 
@@ -972,19 +1125,33 @@ def render_html(state: dict) -> str:
 
     # === Section 4: Today's signals ===
     rs_set = state.get("rs_set", set())
+    _RISK_PT = 0.0075          # rung 1 of the sizing ladder (mirrors executor)
+    _MIN_NOTIONAL = 5.0        # typical Binance USD-M minimum (approx; executor uses exact filters)
     sig_rows = []
     for s in state["signals"]:
         rs_ok = s.symbol in rs_set
         rs_cell = ("<td class='pnl-pos'>TOP-Q</td>" if rs_ok
                    else "<td class='muted'>—</td>")
+        # tradeable-at-current-equity: connects signals to the capital story
+        if s.verdict in ("LONG_ENTRY", "SHORT_ENTRY") and s.atr > 0:
+            stop_dist = 2 * s.atr
+            notional = (K["equity"] * _RISK_PT / stop_dist) * s.last_close
+            if notional >= _MIN_NOTIONAL:
+                trad_cell = f"<td class='pnl-pos'>YES (~${notional:.2f})</td>"
+            else:
+                need_eq = _MIN_NOTIONAL * stop_dist / (s.last_close * _RISK_PT)
+                trad_cell = (f"<td class='pnl-neg'>NO — ~${notional:.2f} &lt; "
+                             f"${_MIN_NOTIONAL:.0f} min (needs ~${need_eq:,.0f} equity)</td>")
+        else:
+            trad_cell = "<td class='muted'>—</td>"
         sig_rows.append(
             f"<tr><td>{s.symbol}</td><td>{fmt_num(s.last_close, 4)}</td>"
             f"<td>{fmt_num(s.entry_high, 4)}</td><td>{fmt_num(s.entry_low, 4)}</td>"
             f"<td>{fmt_num(s.adx, 1)}</td><td>{fmt_num(s.funding_bps, 2, signed=True)}</td>"
             f"{rs_cell}"
-            f"<td class='{verdict_class(s.verdict)}'>{s.verdict}</td></tr>"
+            f"<td class='{verdict_class(s.verdict)}'>{s.verdict}</td>{trad_cell}</tr>"
         )
-    sig_body = "".join(sig_rows) or '<tr><td colspan="8" class="muted">no signal data</td></tr>'
+    sig_body = "".join(sig_rows) or '<tr><td colspan="9" class="muted">no signal data</td></tr>'
 
     # === Section 5: Pipeline ===
     pipeline_pos_rows = []
@@ -1169,21 +1336,49 @@ tr:hover td {{ background: #1a2330; }}
 </style></head><body>
 
 <h1>Donchian (55/20) - Full Dashboard</h1>
+{headline}
 <div class="sub">Variant: <b>{variant_label}</b> &middot; Universe: <b>{len(SYMBOLS)}</b> symbols ({univ_label}) &middot; refresh: <code style="color:#1d9bf0">python dashboard.py</code></div>
 
+<!-- ============ 1. ACT: do I need to do anything? ============ -->
 {banner}
-{perf_strip}
 
 <div class="grid">
-{ops_strip}
+
+<!-- ============ 2. DID: what the machine did since I last looked ============ -->
+{ledger_card}
+{first_trade_card}
+<div class="row-2">
+  <div class="card">
+    <h2>What Changed (since last run)</h2>
+    <ul class="changed">{changed_rows}</ul>
+  </div>
+  {risk_card}
+</div>
+
+<!-- ============ 3. NOW: my money right now ============ -->
+{perf_strip}
 {sys_state}
+{ops_strip}
+
+<div class="card">
+  <h2>Open Positions (with lifecycle)</h2>
+  <table>
+    <thead><tr>
+      <th>symbol</th><th>side</th><th>entry</th><th>entry px</th><th>current</th>
+      <th>PnL $</th><th>R</th><th>milestone</th><th>dist exit</th><th>days/stop</th>
+    </tr></thead>
+    <tbody>{pos_body}</tbody>
+  </table>
+</div>
+
+<!-- ============ 4. NEXT: what is about to happen ============ -->
 {regime_card}
 
 <div class="card">
   <h2>Today's Signals</h2>
   <table>
     <thead><tr><th>symbol</th><th>close</th><th>{N_ENTRY}d high</th><th>{N_ENTRY}d low</th>
-      <th>ADX</th><th>fund bps</th><th>rel-strength</th><th>verdict</th></tr></thead>
+      <th>ADX</th><th>fund bps</th><th>rel-strength</th><th>verdict</th><th>tradeable @ equity?</th></tr></thead>
     <tbody>{sig_body}</tbody>
   </table>
 </div>
@@ -1206,22 +1401,34 @@ tr:hover td {{ background: #1a2330; }}
   </div>
 </div>
 
-{discipline_card}
-
 <div class="row-2">
   {unlock_card}
   {calendar_card}
 </div>
 
+<!-- ============ 5. PROOF: is the edge real? ============ -->
+{discipline_card}
 {attribution_card}
 
 <div class="card">
-  <h2>Monte Carlo Cone — is live performance NORMAL? (green = live path;
-      shaded = range of luck with a REAL edge; 26% of good sequences end 20
-      trades negative — only breaking BELOW the cone is evidence)</h2>
+  <h2>Monte Carlo Cone — is live performance NORMAL?</h2>
+  <div class="kpi-s" style="margin-bottom:8px;">green = live path · shaded = range of luck
+    with a REAL edge · 26% of good sequences end 20 trades negative — only breaking
+    BELOW the cone is evidence of a problem</div>
   {cone_svg}
 </div>
 
+{cal_card}
+
+<div class="card">
+  <h2>Metrics vs Targets (leading-trader view — grey = insufficient sample, judge nothing early)</h2>
+  <table>
+    <thead><tr><th>sleeve</th><th>metric</th><th>live value</th><th>target / rule</th></tr></thead>
+    <tbody>{metrics_body}</tbody>
+  </table>
+</div>
+
+<!-- ============ 6. REFERENCE ============ -->
 <div class="row-2">
   <div class="card">
     <h2>Capital Planner (deposit pace -> milestone dates)</h2>
@@ -1235,35 +1442,6 @@ tr:hover td {{ background: #1a2330; }}
       <tbody>{stress_body}</tbody>
     </table>
   </div>
-</div>
-
-<div class="card">
-  <h2>Open Positions (with lifecycle)</h2>
-  <table>
-    <thead><tr>
-      <th>symbol</th><th>side</th><th>entry</th><th>entry px</th><th>current</th>
-      <th>PnL $</th><th>R</th><th>milestone</th><th>dist exit</th><th>days/stop</th>
-    </tr></thead>
-    <tbody>{pos_body}</tbody>
-  </table>
-</div>
-
-<div class="row-2">
-  <div class="card">
-    <h2>What Changed (since last run)</h2>
-    <ul class="changed">{changed_rows}</ul>
-  </div>
-  {risk_card}
-</div>
-
-{cal_card}
-
-<div class="card">
-  <h2>Metrics vs Targets (leading-trader view — grey = insufficient sample, judge nothing early)</h2>
-  <table>
-    <thead><tr><th>sleeve</th><th>metric</th><th>live value</th><th>target / rule</th></tr></thead>
-    <tbody>{metrics_body}</tbody>
-  </table>
 </div>
 
 <div class="row-2">
@@ -1455,6 +1633,20 @@ def build_action_banner(state: dict) -> tuple[str, str, str]:
     if ops.get("acct_age_h") is not None and ops["acct_age_h"] > 36:
         return ("warn", "CHECK: account sync is stale",
                 f"last synced {ops['acct_age_h']:.0f}h ago — nightly run may be failing.")
+    # Executor failures in the last run (2026-09-18: banner said "nominal"
+    # directly above an ENTRY FAILED -2015 ledger. Register rule: any check
+    # must recompute the banner — the banner must read execution RESULTS.)
+    led = parse_exec_ledger()
+    failed = [t for c, t in led["lines"] if c == "pnl-neg"]
+    if failed:
+        first = failed[0]
+        if "-2015" in first or "Invalid API-key" in first:
+            return ("err", "⚠ ACTION NEEDED: live order REJECTED — fix API key",
+                    "Binance rejected the executor's order with -2015 (key can read, "
+                    "not trade). Binance → API Management → Enable Futures (IP "
+                    "Unrestricted), then run: python executor.py --selftest")
+        return ("err", "⚠ ACTION NEEDED: executor reported a failure last run",
+                first[:160])
     return ("ok", "NO ACTION NEEDED", "all systems nominal — the machine has the watch")
 
 

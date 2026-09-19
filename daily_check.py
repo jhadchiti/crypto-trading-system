@@ -59,6 +59,8 @@ def run_step(name: str, script: str) -> bool:
             cwd=str(HERE),
             capture_output=True,
             text=True,
+            encoding="utf-8",   # children print UTF-8 (guard installed fleet-wide);
+            errors="replace",   # decoding with the locale cp1252 mangled 龙虾 etc.
             timeout=600,   # 10-min cap
         )
         if result.stdout:

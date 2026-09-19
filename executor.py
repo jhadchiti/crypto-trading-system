@@ -80,6 +80,10 @@ DEFAULT_CONFIG = {
     "leverage": 3,
     "margin_type": "ISOLATED",
     "price_sanity_pct": 1.0,
+    # small-account exchange-floor override: max risk when bumping an order
+    # up to the $5 exchange minimum (operator decision 2026-09-19; see
+    # CRITICAL_REGISTER). Never above the 2% lifetime ceiling.
+    "min_notional_risk_cap": 0.0125,
 }
 
 
@@ -311,7 +315,7 @@ def mark_price(symbol: str) -> float:
 
 TRADE_COLS = ["symbol", "side", "entry_date", "exit_date", "entry_price",
               "exit_price", "size", "pnl_gross", "pnl_net", "r_multiple",
-              "exit_reason", "bars_held"]
+              "exit_reason", "bars_held", "stop_price", "risk_dollars"]
 
 
 def load_trades() -> pd.DataFrame:
@@ -322,13 +326,14 @@ def load_trades() -> pd.DataFrame:
 
 
 def append_entry(symbol: str, side: int, price: float, qty: float,
-                 stop: float) -> None:
+                 stop: float, risk_dollars: float = 0.0) -> None:
     df = load_trades()
     row = {c: "" for c in TRADE_COLS}
     row.update({
         "symbol": symbol, "side": side,
         "entry_date": datetime.now(timezone.utc).isoformat(),
         "exit_date": "", "entry_price": price, "size": qty if side > 0 else -qty,
+        "stop_price": stop, "risk_dollars": round(risk_dollars, 4),
     })
     df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
     df.to_csv(TRADES_FILE, index=False)
@@ -490,9 +495,22 @@ def run(selftest: bool = False, rehearse: bool = False) -> None:
     ex_pos = open_exchange_positions(acct)
 
     if selftest:
-        print(f"  SELFTEST OK: futures wallet ${margin_bal:.2f} "
+        # TRADING-permission probe (post-mortem 2026-09-18: a read-only key
+        # passed every selftest for weeks, then killed the FIRST live order
+        # with -2015. Reads proving nothing about trading, probe it directly
+        # with a harmless leverage call.)
+        try:
+            fapi("POST", "/fapi/v1/leverage", {"symbol": "BTCUSDT", "leverage": 3})
+            trade_perm = "TRADING PERMISSION OK"
+        except Exception as e:
+            trade_perm = (f"!! TRADING PERMISSION FAILED: {e} — the key can "
+                          f"READ but CANNOT TRADE. Fix in Binance API "
+                          f"Management (Enable Futures) or replace secrets.env "
+                          f"with the futures-enabled key.")
+        print(f"  SELFTEST: futures wallet ${margin_bal:.2f} "
               f"(available ${avail:.2f}), {len(ex_pos)} open positions, "
               f"{len(_FILTERS)} symbols in filter cache, sizing equity ${equity:.2f}")
+        print(f"  {trade_perm}")
         return
 
     # --- Gate 1: daily loss limit (transfer-aware) ---
@@ -572,7 +590,15 @@ def run(selftest: bool = False, rehearse: bool = False) -> None:
         side = 1 if float(row["size"]) > 0 else -1
         qty = abs(float(row["size"]))
         entry_price = float(row["entry_price"])
-        risk_dollars = equity * cfg["risk_per_trade"]
+        # R-multiples measure against the ACTUAL risk stored at entry
+        # (floor-bumped trades risk more than the 0.75% target; assuming the
+        # target would inflate their R). Fallback for legacy rows only.
+        try:
+            risk_dollars = float(row.get("risk_dollars") or 0)
+        except (TypeError, ValueError):
+            risk_dollars = 0.0
+        if risk_dollars <= 0:
+            risk_dollars = equity * cfg["risk_per_trade"]
 
         # Case A: exchange position gone -> ATR stop filled on-exchange
         if sym not in ex_pos:
@@ -665,16 +691,43 @@ def run(selftest: bool = False, rehearse: bool = False) -> None:
         if notional > cfg["max_notional_per_trade"]:
             qty = cfg["max_notional_per_trade"] / mp
             notional = qty * mp
-        minN = _FILTERS[s.symbol]["minNotional"]
-        if notional < minN:
-            actions.append(f"SKIP {s.symbol}: notional ${notional:.2f} < "
-                           f"exchange minimum ${minN:.2f} (account too small "
-                           f"for this symbol at current risk settings)")
-            continue
+        # minNotional is checked on the ROUNDED quantity (2026-09-19: ZEC
+        # sized to $6.07 pre-rounding, step rounding dropped it to $4.68 and
+        # the exchange rejected -4164 — the order should never have been sent).
+        #
+        # EXCHANGE-FLOOR OVERRIDE (2026-09-19, operator decision, registered
+        # in CRITICAL_REGISTER): at current equity, 0.75% sizing lands below
+        # the $5 exchange minimum on wide-stop signals. When that happens,
+        # bump the quantity UP to the exchange floor — but ONLY while the
+        # implied risk stays within min_notional_risk_cap (default 1.25% of
+        # equity). Above the cap the trade still skips: the floor must never
+        # become a backdoor to uncapped sizing. Override becomes inactive
+        # automatically once equity grows enough that 0.75% clears the floor.
         qty_str = fmt_qty(s.symbol, qty)
-        if float(qty_str) <= 0:
-            actions.append(f"SKIP {s.symbol}: quantity rounds to zero")
-            continue
+        notional = float(qty_str) * mp
+        minN = _FILTERS[s.symbol]["minNotional"]
+        if float(qty_str) <= 0 or notional < minN:
+            step = _FILTERS[s.symbol]["stepSize"]
+            needed = max(minN / mp, _FILTERS[s.symbol]["minQty"], step)
+            bumped = math.ceil(needed / step - 1e-9) * step
+            bump_risk = bumped * stop_dist
+            cap_pct = cfg.get("min_notional_risk_cap", 0.0125)
+            if bump_risk > equity * cap_pct:
+                actions.append(
+                    f"SKIP {s.symbol}: exchange-minimum size would risk "
+                    f"${bump_risk:.2f} ({bump_risk / equity * 100:.2f}% of "
+                    f"equity) > {cap_pct * 100:.2f}% floor-override cap")
+                continue
+            qty_str = fmt_qty(s.symbol, bumped)
+            notional = float(qty_str) * mp
+            actions.append(
+                f"NOTE {s.symbol}: sized UP to exchange minimum — notional "
+                f"${notional:.2f}, actual risk ${float(qty_str) * stop_dist:.2f} "
+                f"({float(qty_str) * stop_dist / equity * 100:.2f}% vs "
+                f"{cfg['risk_per_trade'] * 100:.2f}% target)")
+        # actual risk of the order that will really be sent (post-rounding /
+        # post-bump) — this is what R-multiples must be measured against
+        risk_dollars = float(qty_str) * stop_dist
         # margin check: need notional/leverage + buffer
         margin_needed = notional / cfg["leverage"] * 1.25
         if cfg.get("live") and margin_needed > avail:
@@ -723,7 +776,8 @@ def run(selftest: bool = False, rehearse: bool = False) -> None:
                     return
                 continue
 
-            append_entry(s.symbol, side, fill, float(qty_str), float(stop_str))
+            append_entry(s.symbol, side, fill, float(qty_str), float(stop_str),
+                         risk_dollars=risk_dollars)
             executed.add(sid)
             n_open += 1
             avail -= margin_needed
