@@ -167,7 +167,11 @@ def fetch_futures() -> dict:
             "symbol": p["symbol"],
             "amount": float(p["positionAmt"]),
             "entry_price": float(p["entryPrice"]),
-            "unrealized_pnl": float(p["unRealizedProfit"]),
+            # Binance spells this field differently across endpoints
+            # (unRealizedProfit on positionRisk vs unrealizedProfit on
+            # account) — latent until the first-ever open position (2026-09-19)
+            "unrealized_pnl": float(p.get("unRealizedProfit",
+                                          p.get("unrealizedProfit", 0)) or 0),
             "side": "LONG" if float(p["positionAmt"]) > 0 else "SHORT",
         }
         for p in acct.get("positions", [])
