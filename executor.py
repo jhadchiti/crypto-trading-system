@@ -413,12 +413,20 @@ def place_entry(symbol: str, side: int, qty_str: str) -> dict:
 
 def place_stop(symbol: str, side: int, stop_price_str: str) -> dict:
     """Exchange-side stop: closes the whole position if hit (works 24/7,
-    even when this script isn't running)."""
-    return fapi("POST", "/fapi/v1/order", {
+    even when this script isn't running).
+
+    2026-09-19: Binance migrated conditional orders (STOP_MARKET etc.) off
+    POST /fapi/v1/order (-4120 'use the Algo Order API endpoints instead',
+    change effective 2025-12-09) to POST /fapi/v1/algoOrder with
+    algoType=CONDITIONAL and the trigger given as triggerPrice (NOT
+    stopPrice). Discovered live on the FIRST fill (UNI) — the reverse-if-no-
+    stop rail closed the position safely."""
+    return fapi("POST", "/fapi/v1/algoOrder", {
+        "algoType": "CONDITIONAL",
         "symbol": symbol,
         "side": "SELL" if side > 0 else "BUY",
         "type": "STOP_MARKET",
-        "stopPrice": stop_price_str,
+        "triggerPrice": stop_price_str,
         "closePosition": "true",
         "workingType": "MARK_PRICE",
     })
@@ -436,8 +444,16 @@ def close_position(symbol: str, side: int, qty_str: str) -> dict:
 
 
 def cancel_all(symbol: str) -> None:
+    # regular orders AND algo/conditional orders (separate namespace since
+    # 2025-12-09 — allOpenOrders does NOT cover algo orders, so a stale stop
+    # would survive and could fire on a future position if only the old
+    # endpoint were called)
     try:
         fapi("DELETE", "/fapi/v1/allOpenOrders", {"symbol": symbol})
+    except Exception:
+        pass
+    try:
+        fapi("DELETE", "/fapi/v1/algoOpenOrders", {"symbol": symbol})
     except Exception:
         pass
 

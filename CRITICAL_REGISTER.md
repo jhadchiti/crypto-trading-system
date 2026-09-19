@@ -148,6 +148,26 @@ risk. This is a size-floor accommodation, not a sizing increase by appetite.
 **Trader's honest note:** at 1.17% risk per trade, a normal 8-loss streak
 (p≈26% of 20-trade runs start negative) costs ~9% instead of ~6%. Accepted.
 
+## POST-MORTEM 2026-09-19: first fill ever — and the naked-stop rail earned its keep
+
+**Event:** first live fill in system history (1 UNI @ 8.8717, floor-override
+sizing). Stop placement then failed 3x with -4120: Binance had migrated all
+conditional orders to a new Algo Order API (effective 2025-12-09) — the old
+STOP_MARKET on /fapi/v1/order is dead. The 2026-08-02 rail ("flat is safe,
+naked overnight is not") closed the position within seconds. Cost: ~1 cent
+of fees. Without that rail: an unprotected leveraged position overnight.
+**Root cause:** exchange API contract changed under us; order path had never
+run live, so the break was invisible until the first fill. Same lesson class
+as -2015: only a live call through a path proves the path.
+**Fix:** place_stop → POST /fapi/v1/algoOrder (algoType=CONDITIONAL,
+triggerPrice, closePosition, MARK_PRICE); cancel_all now also clears
+/fapi/v1/algoOpenOrders (algo orders live in a separate namespace — a stale
+stop would otherwise survive symbol cleanup and could fire on a future
+position). Signal was NOT consumed by the reversal — re-entry allowed.
+**Watch:** Binance API changelog is now a live risk surface; a same-class
+migration of MARKET orders or position endpoints would break entry/exit.
+The reverse/halt rails are the containment for that class.
+
 ## MONITORING (known, unresolved, watched)
 
 | Question | Why it matters | Watch via |
