@@ -167,6 +167,12 @@ position). Signal was NOT consumed by the reversal — re-entry allowed.
 **Watch:** Binance API changelog is now a live risk surface; a same-class
 migration of MARKET orders or position endpoints would break entry/exit.
 The reverse/halt rails are the containment for that class.
+**Addendum 2026-09-24:** the unRealizedProfit field-case bug fixed in
+account_sync on 09-19 was NOT swept fleet-wide that day — the identical line
+in executor.py crashed the first authenticated run after the IP lockout.
+The sweep rule failed for the second time (first: 08-18 UTF-8). Sweep now
+done (grep shows zero remaining). Lesson unchanged and now twice-paid:
+a fix without a same-day fleet sweep is half a fix.
 
 ## MONITORING (known, unresolved, watched)
 

@@ -284,7 +284,12 @@ def open_exchange_positions(acct: dict) -> dict:
             out[p["symbol"]] = {
                 "amount": amt,
                 "entry_price": float(p["entryPrice"]),
-                "unrealized": float(p["unRealizedProfit"]),
+                # field case differs across Binance endpoints (unRealizedProfit
+                # vs unrealizedProfit) — same bug class as account_sync 09-19;
+                # this line was missed in that day's sweep (register rule broken,
+                # noted in post-mortem)
+                "unrealized": float(p.get("unRealizedProfit",
+                                          p.get("unrealizedProfit", 0)) or 0),
             }
     return out
 
