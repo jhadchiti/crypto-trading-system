@@ -174,6 +174,22 @@ The sweep rule failed for the second time (first: 08-18 UTF-8). Sweep now
 done (grep shows zero remaining). Lesson unchanged and now twice-paid:
 a fix without a same-day fleet sweep is half a fix.
 
+## ADDED 2026-10-03: process instrumentation (EDGE_FRAMEWORK sketches 1+2)
+
+Two advisory pipeline steps, zero execution-path changes, zero test budget:
+- **renewal_monitor.py** — SPC on the trading process: live trade durations,
+  entry gaps, and censored open-position ages vs the 181-trade backtest
+  reference (permutation tests, alarm p<0.01, judgment gated at n≥10).
+  Catches process breakage via time structure before P&L shows it.
+- **positioning_collector.py** — nightly OI / long-short / taker / funding
+  snapshots per universe symbol into positioning_history.csv. Binance serves
+  only ~30d of this; we are building the 180d+ dataset a future
+  liquidation-cascade hypothesis needs (new-data budget when mature).
+Engineer's sweep: both advisory (exit 0 always), no shared state with
+executor, collector is public-endpoint only (no keys), ~180 public calls
+per night at 0.25s spacing. Trader's sweep: neither trades, neither judges
+early; renewal DEVIATION = investigate, never auto-act.
+
 ## MONITORING (known, unresolved, watched)
 
 | Question | Why it matters | Watch via |

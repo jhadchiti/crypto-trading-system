@@ -170,6 +170,16 @@ def main():
     # Cost-of-discipline audit (blocked-signal receipts). Advisory.
     run_step("discipline_audit", "discipline_audit.py")
 
+    # Positioning dataset collector (EDGE_FRAMEWORK sketch 2): records daily
+    # OI / long-short / taker / funding snapshots that Binance only serves
+    # ~30 days of. Builds the dataset a future cascade hypothesis needs.
+    # Advisory — never blocks.
+    run_step("positioning_collector", "positioning_collector.py")
+
+    # Renewal monitor (EDGE_FRAMEWORK sketch 1): statistical process control
+    # on trade durations / entry gaps vs the backtest. Advisory.
+    run_step("renewal_monitor", "renewal_monitor.py")
+
     # Account sync (read-only; runs only if API keys are configured).
     # Advisory: cross-checks exchange positions vs live_trades.csv.
     import os as _os
