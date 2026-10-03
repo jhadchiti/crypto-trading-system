@@ -17,5 +17,21 @@
     "pct_supply": 13.5,
     "status": "skipped_crowded",
     "registered": "2026-08-02T20:58:47.012281+00:00"
+  },
+  {
+    "symbol": "ENAUSDT",
+    "unlock_date": "2026-10-05",
+    "pct_supply": 14.0,
+    "status": "open",
+    "registered": "2026-10-03T00:38:18.259099+00:00",
+    "entry_px": 0.23438,
+    "entry_time": "2026-10-03T00:38:29.261659+00:00"
+  },
+  {
+    "symbol": "TIAUSDT",
+    "unlock_date": "2026-10-30",
+    "pct_supply": 17.7,
+    "status": "pending",
+    "registered": "2026-10-03T00:38:21.110137+00:00"
   }
 ]

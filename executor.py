@@ -370,6 +370,14 @@ def close_trade_row(symbol: str, exit_price: float, reason: str,
     df = load_trades()
     if df.empty:
         return
+    # All-NaN columns (exit_date, exit_reason, r_multiple while no trade has
+    # ever closed) get type-inferred as float64 by read_csv; pandas 2.x then
+    # refuses to write strings into them (LossySetitemError — crashed the
+    # FIRST exit recording in system history, 2026-10-02). Force object dtype
+    # on string-bearing columns before writing.
+    for c in ("exit_date", "exit_reason", "r_multiple", "bars_held"):
+        if c in df.columns:
+            df[c] = df[c].astype("object")
     mask = (df["symbol"] == symbol) & (df["exit_date"].isna() | (df["exit_date"] == ""))
     idx = df[mask].index
     if len(idx) == 0:
@@ -621,12 +629,20 @@ def run(selftest: bool = False, rehearse: bool = False) -> None:
         if risk_dollars <= 0:
             risk_dollars = equity * cfg["risk_per_trade"]
 
-        # Case A: exchange position gone -> ATR stop filled on-exchange
+        # Case A: exchange position gone -> ATR stop filled on-exchange.
+        # Exit approximation: the STORED STOP PRICE, not today's mark — the
+        # fill happened at the stop whenever it triggered; if the run comes
+        # days later (2026-10 VPN outage), the current mark can be far from
+        # the actual fill and would corrupt the trade record.
         if sym not in ex_pos:
-            px = mark_price(sym)
+            try:
+                px = float(row.get("stop_price") or 0) or mark_price(sym)
+            except (TypeError, ValueError):
+                px = mark_price(sym)
             close_trade_row(sym, px, "atr_stop_exchange", risk_dollars)
             cancel_all(sym)
-            actions.append(f"STOP FILLED (exchange): {sym} — recorded exit ~{px}")
+            actions.append(f"STOP FILLED (exchange): {sym} — recorded exit ~{px} "
+                           f"(stop-price approximation)")
             continue
 
         # Case B: channel / time exit
