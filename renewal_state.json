@@ -1,0 +1,27 @@
+{
+  "checked_at": "2026-10-11T21:29:15.253193+00:00",
+  "overall": "COLLECTING",
+  "checks": [
+    {
+      "name": "durations",
+      "status": "COLLECTING",
+      "detail": "2/10 closed trades \u2014 no judgment"
+    },
+    {
+      "name": "open_age",
+      "status": "OK",
+      "detail": "oldest open 17d vs p95 88d"
+    },
+    {
+      "name": "entry_gaps",
+      "status": "COLLECTING",
+      "detail": "2/10 gaps \u2014 no judgment"
+    },
+    {
+      "name": "entry_rate",
+      "status": "INFO",
+      "detail": "live 18.0 entries/30d vs backtest 2.3 (macro-ON era vs mixed eras \u2014 expect live HIGHER while ON)"
+    }
+  ],
+  "reference_n": 181
+}

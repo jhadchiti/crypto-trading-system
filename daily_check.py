@@ -54,13 +54,22 @@ def log(msg: str) -> None:
 def run_step(name: str, script: str) -> bool:
     log(f"START {name} ({script})")
     try:
+        import os as _os
+        child_env = dict(_os.environ, PYTHONIOENCODING="utf-8")
+        # PYTHONIOENCODING kills the cp1252 bug CLASS for every child this
+        # pipeline will ever launch — including scripts added later that
+        # forget the per-file console guard (2026-10-11: dynamic_universe
+        # was serialized into the pipeline AFTER the 09-13 sweep and crashed
+        # every Sunday on a '←' character. Third strike for this class;
+        # per-file guards don't scale, the environment does.)
         result = subprocess.run(
             [PYTHON, str(HERE / script)],
             cwd=str(HERE),
             capture_output=True,
             text=True,
-            encoding="utf-8",   # children print UTF-8 (guard installed fleet-wide);
-            errors="replace",   # decoding with the locale cp1252 mangled 龙虾 etc.
+            encoding="utf-8",   # decode child output as UTF-8 too
+            errors="replace",
+            env=child_env,
             timeout=600,   # 10-min cap
         )
         if result.stdout:

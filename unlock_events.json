@@ -22,10 +22,13 @@
     "symbol": "ENAUSDT",
     "unlock_date": "2026-10-05",
     "pct_supply": 14.0,
-    "status": "open",
+    "status": "completed",
     "registered": "2026-10-03T00:38:18.259099+00:00",
     "entry_px": 0.23438,
-    "entry_time": "2026-10-03T00:38:29.261659+00:00"
+    "entry_time": "2026-10-03T00:38:29.261659+00:00",
+    "exit_px": 0.20726,
+    "exit_time": "2026-10-09T00:10:14.514498+00:00",
+    "net_pct": 11.39
   },
   {
     "symbol": "TIAUSDT",

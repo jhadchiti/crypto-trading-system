@@ -569,8 +569,20 @@ def run(selftest: bool = False, rehearse: bool = False) -> None:
                 return
 
     # --- Compute signals (same code path as alerter/dashboard) ---
+    # HELD symbols are fetched even when they drop out of the dynamic
+    # universe (2026-10-11: RAYSOL left the Sunday-refreshed universe while
+    # OPEN — without this, Case B silently skips it and the position becomes
+    # hard-stop-only: channel exits and the 90d time stop never fire).
+    held: set = set()
+    try:
+        _lt = load_trades()
+        if not _lt.empty:
+            held = set(_lt[_lt["exit_date"].isna() | (_lt["exit_date"] == "")]
+                       ["symbol"].astype(str))
+    except Exception:
+        pass
     symbol_data = {}
-    for s in db.SYMBOLS:
+    for s in list(db.SYMBOLS) + sorted(held - set(db.SYMBOLS)):
         try:
             symbol_data[s] = db.fetch_recent(s, bars=300)
             symbol_data[f"_funding_{s}"] = db.fetch_current_funding_bps(s)
@@ -603,7 +615,12 @@ def run(selftest: bool = False, rehearse: bool = False) -> None:
     except Exception:
         pass
 
-    signals = db.compute_signals(symbol_data, macro_on, fng_value, btc_rel_by_symbol)
+    # signals are computed on the UNIVERSE view only — held-but-delisted
+    # symbols stay out of the RS ranking so executor verdicts match the
+    # alerter/dashboard exactly; full symbol_data still serves exits below
+    universe_view = {k: v for k, v in symbol_data.items()
+                     if k.startswith("_") or k in db.SYMBOLS}
+    signals = db.compute_signals(universe_view, macro_on, fng_value, btc_rel_by_symbol)
     actions = []
 
     # ------------------------------------------------------------------
@@ -688,6 +705,12 @@ def run(selftest: bool = False, rehearse: bool = False) -> None:
 
     for s in signals:
         if s.verdict not in ("LONG_ENTRY", "SHORT_ENTRY"):
+            continue
+        # held-but-delisted-from-universe symbols are fetched for EXIT
+        # management only — never entry-eligible (and they're excluded from
+        # the alerter/dashboard RS ranking, so entering them would act on a
+        # ranking the validated pipeline never saw)
+        if s.symbol not in db.SYMBOLS:
             continue
         sid = f"{today_iso}|{s.symbol}|{s.verdict}"
         if sid in executed:

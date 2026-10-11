@@ -28,6 +28,17 @@ Reads/writes:
 
 from __future__ import annotations
 
+# UTF-8 console guard (2026-10-11: the '←' must-include marker crashed every
+# Sunday refresh under cp1252 — this script joined the pipeline after the
+# 09-13 fleet sweep and was missed. daily_check now also forces
+# PYTHONIOENCODING=utf-8 on all children; this guard covers manual runs.)
+import sys as _sys
+try:
+    _sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    _sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
 import argparse
 import json
 from datetime import datetime, timezone
